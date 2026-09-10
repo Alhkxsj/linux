@@ -1,0 +1,14 @@
+menuconfig MTK_FLASHLIGHT
+	tristate "MTK flashlight support"
+	depends on LEDS_CLASS_FLASH || !LEDS_CLASS_FLASH
+	default n
+
+if MTK_FLASHLIGHT
+
+config MTK_FLASHLIGHT_CORE
+	tristate "MTK flashlight core"
+	depends on MTK_FLASHLIGHT
+
+source "drivers/misc/mediatek/flashlight/v4l2/Kconfig"
+
+endif
