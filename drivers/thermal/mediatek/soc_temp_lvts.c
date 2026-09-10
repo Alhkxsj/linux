@@ -37,6 +37,39 @@
 static bool high_temp_aging;
 module_param(high_temp_aging, bool, 0644);
 
+/*
+ * WORKAROUND(bring-up): gate the probe so LVTS can be brought up on a live
+ * system. Arming the hardware thermal reboot with a bad threshold resets the
+ * SoC instantly and silently, which throws away the failure point; with the
+ * gate the board boots without LVTS and the probe can be re-run under
+ * observation:
+ *
+ *   echo 0 > /sys/module/soc_temp_lvts/parameters/lvts_enable
+ *   echo 10315000.lvts > /sys/bus/platform/drivers/mtk-soc-temp-lvts/unbind
+ *
+ * On by default: the normal boot path (LVTS pre-initialised by the
+ * bootloader) is the one that works, see the LK check in lvts_init().
+ */
+static bool lvts_enable = true;
+module_param(lvts_enable, bool, 0644);
+
+/*
+ * WORKAROUND(bring-up): leave the LVTS hardware thermal-reboot protection
+ * untouched. Arming it with a wrong threshold reboots the SoC instantly and
+ * silently; the software thermal zones (soc_max_crit at 116.85 C) still cover
+ * overtemperature while this is off. Arm only on a verified threshold.
+ */
+static bool arm_hw_reboot;
+module_param(arm_hw_reboot, bool, 0644);
+
+/*
+ * The vendor's full LVTS init sequence (used when the bootloader did not
+ * leave the controller running) mis-programs the sensing points on this
+ * port, see lvts_init(). Off unless someone wants to debug that path.
+ */
+static bool force_hw_init;
+module_param(force_hw_init, bool, 0644);
+
 #ifdef DUMP_MORE_LOG
 #define NUM_LVTS_DEVICE_REG (9)
 #define LVTS_CONTROLLER_DEBUG_NUM (10)
@@ -895,6 +928,7 @@ static void set_tc_hw_reboot_threshold(struct lvts_data *lvts_data,
 	unsigned int msr_raw, cur_msr_raw, temp, config, ts_name, d_index, i;
 	void __iomem *base;
 	struct platform_ops *ops = &lvts_data->ops;
+	bool coeff_invalid = false;
 
 	base = GET_BASE_ADDR(tc_id);
 	d_index = get_dominator_index(lvts_data, tc_id);
@@ -909,6 +943,8 @@ static void set_tc_hw_reboot_threshold(struct lvts_data *lvts_data,
 		writel(config | temp, LVTSPROTCTL_0 + base);
 		msr_raw = 0;
 		for (i = 0; i < tc[tc_id].num_sensor; i++) {
+			if (tc[tc_id].coeff.a[i] <= 0)
+				coeff_invalid = true;
 			cur_msr_raw = ops->lvts_temp_to_raw(&(tc[tc_id].coeff), i, trip_point);
 			if (msr_raw < cur_msr_raw)
 				msr_raw = cur_msr_raw;
@@ -918,7 +954,24 @@ static void set_tc_hw_reboot_threshold(struct lvts_data *lvts_data,
 		/* Select protection sensor */
 		config = ((d_index << 2) + 0x2) << 16;
 		writel(config | temp, LVTSPROTCTL_0 + base);
+		if (tc[tc_id].coeff.a[d_index] <= 0)
+			coeff_invalid = true;
 		msr_raw = ops->lvts_temp_to_raw(&(tc[tc_id].coeff), d_index, trip_point);
+	}
+
+	/*
+	 * A coefficient of zero or less means the sensor was not calibrated
+	 * (count_r == 0). lvts_temp_to_raw() would then return a huge unsigned
+	 * threshold, which makes the LVTS hardware trip its thermal reboot the
+	 * moment the protection is re-armed -- a reboot loop with no software
+	 * trace. Leave the protection disabled instead (the offset written by
+	 * disable_hw_reboot_interrupt() is still in effect).
+	 */
+	if (coeff_invalid) {
+		dev_err(lvts_data->dev,
+			"LVTS%d: uncalibrated sensor, leaving HW thermal reboot disabled\n",
+			tc_id);
+		return;
 	}
 
 	if (lvts_data->enable_dump_log) {
@@ -943,6 +996,11 @@ static void set_all_tc_hw_reboot(struct lvts_data *lvts_data)
 	struct device *dev = lvts_data->dev;
 	struct tc_settings *tc = lvts_data->tc;
 	int i, trip_point;
+
+	if (!arm_hw_reboot) {
+		dev_info(dev, "HW thermal reboot left alone (arm_hw_reboot=0)\n");
+		return;
+	}
 
 	for (i = 0; i < lvts_data->num_tc; i++) {
 		/*
@@ -1086,6 +1144,19 @@ static int lvts_init(struct lvts_data *lvts_data)
 				dev_info(dev, "%s, LK init LVTS\n", __func__);
 
                 return ret;
+	}
+
+	if (!force_hw_init) {
+		/*
+		 * The vendor's own init sequence does not reproduce the
+		 * bootloader's LVTS state here: the sensing points then report
+		 * garbage (-68 C and +125 C have both been observed), which
+		 * would drive the software critical trip. Refuse to register
+		 * the zones instead of publishing bad temperatures.
+		 */
+		dev_err(dev,
+			"LVTS was not initialised by the bootloader, refusing to probe (force_hw_init=1 to force)\n");
+		return -ENODEV;
 	}
 
 	lvts_reset(lvts_data);
@@ -1497,6 +1568,11 @@ static int lvts_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct lvts_data *lvts_data;
 	int ret;
+
+	if (!lvts_enable) {
+		dev_info(dev, "LVTS probe gated off (lvts_enable=0)\n");
+		return -ENODEV;
+	}
 
 	lvts_data = (struct lvts_data *) of_device_get_match_data(dev);
 

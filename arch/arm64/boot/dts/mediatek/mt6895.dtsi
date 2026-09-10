@@ -3757,11 +3757,20 @@ block_size = <0x1000>;
 		pwm_data_invert = <0>;
 		pwm-supply = "mt6368_vio28";
 	};
-	/* Infra efuse (the stock "devinfo" block): the LVTS calibration comes
-	 * from these three cells via the generic nvmem interface. */
+	/* Infra efuse controller (feeds mtk-socinfo). */
 	efuse: efuse@11f10000 {
 		compatible = "mediatek,efuse";
 		reg = <0x11f10000 0x10000>;
+	};
+
+	/* Bootloader device info table (/chosen/atag,devinfo). Stock uses this
+	 * node, not the efuse window, as the LVTS calibration source: reading
+	 * the same offsets straight out of the efuse returns different data and
+	 * zeroes where the per-sensor counts belong, which makes the LVTS
+	 * coefficients degenerate. The driver never maps the efuse, so there is
+	 * deliberately no reg here. */
+	devinfo {
+		compatible = "mediatek,devinfo";
 		#address-cells = <1>;
 		#size-cells = <1>;
 
@@ -3777,7 +3786,6 @@ block_size = <0x1000>;
 	lvts: lvts@10315000 {
 		compatible = "mediatek,mt6895-lvts";
 		#thermal-sensor-cells = <1>;
-		status = "disabled";
 		reg = <0x10315000 0x1000>,
 		     <0x10316000 0x1000>;
 		interrupts-extended = <&gic 0 213 4 0>, <&gic 0 214 4 0>;
