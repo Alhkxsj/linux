@@ -3779,10 +3779,14 @@ block_size = <0x1000>;
 		lvts_e_data3: data3 { reg = <0x2d4 0x14>; };
 	};
 
-	/* LVTS (low-voltage thermal sensors), stock parity. Two LVTS domains:
-	 * 0x10315000 = MCU (3 controllers, 12 sensors), 0x10316000 = AP
-	 * (6 controllers, 13 sensors). Reset lines are TI syscon-reset
-	 * indices 0/1; the bus clock is a fixed 26 MHz stand-in. */
+	/* LVTS (low-voltage thermal sensors), stock parity. Two LVTS domains,
+	 * in the order the driver's domain enum expects (AP = 0, MCU = 1):
+	 * 0x10315000 = AP (3 controllers, 7 sensors), 0x10316000 = MCU
+	 * (5 controllers, 18 sensors, of which the board lights up 3).
+	 * Stock's reset index 0 is labelled lvts_ap, which is what fixes the
+	 * mapping. Reset lines are TI syscon-reset indices 0/1; the bus clock
+	 * is a fixed 26 MHz stand-in (the real CLK_IFRAO_THERM gate reads
+	 * gated on this board while LVTS register access works regardless). */
 	lvts: lvts@10315000 {
 		compatible = "mediatek,mt6895-lvts";
 		#thermal-sensor-cells = <1>;

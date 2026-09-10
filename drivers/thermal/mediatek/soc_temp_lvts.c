@@ -54,13 +54,22 @@ static bool lvts_enable = true;
 module_param(lvts_enable, bool, 0644);
 
 /*
- * WORKAROUND(bring-up): leave the LVTS hardware thermal-reboot protection
- * untouched. Arming it with a wrong threshold reboots the SoC instantly and
- * silently; the software thermal zones (soc_max_crit at 116.85 C) still cover
- * overtemperature while this is off. Arm only on a verified threshold.
+ * The LVTS hardware thermal-reboot protection trips when the measured MSR raw
+ * count falls to the value programmed in LVTSPROTTC (smaller raw = hotter).
+ * Arm only when the computed threshold is unmistakeably below the count the
+ * hardware is reporting right now, so a bad coefficient (which produces a huge
+ * unsigned threshold) can never arm a trip point that fires immediately. The
+ * comparison is deliberately done in raw space: the current count is a hardware
+ * measurement, so it stays meaningful even when the calibration is nonsense.
  */
-static bool arm_hw_reboot;
-module_param(arm_hw_reboot, bool, 0644);
+#define LVTS_PROT_RAW_MIN	4000	/* ~400 C upper bound on the raw scale */
+#define LVTS_PROT_RAW_MARGIN	200	/* ~4 C of slack against the live count */
+
+static const struct kernel_param_ops arm_hw_reboot_ops;
+static struct lvts_data *lvts_data_ref;
+static bool arm_hw_reboot = true;
+
+static void set_all_tc_hw_reboot(struct lvts_data *lvts_data);
 
 /*
  * The vendor's full LVTS init sequence (used when the bootloader did not
@@ -974,6 +983,39 @@ static void set_tc_hw_reboot_threshold(struct lvts_data *lvts_data,
 		return;
 	}
 
+	/*
+	 * Second gate, in hardware units: the live MSR count is a measurement,
+	 * so it stays trustworthy even if the coefficients are not. Refuse to
+	 * arm a threshold that is not clearly colder than what the sensor
+	 * reports now.
+	 */
+	cur_msr_raw = 0;
+	if (d_index == ALL_SENSING_POINTS) {
+		/* Hottest of the protection candidates (= smallest count). */
+		for (i = 0; i < tc[tc_id].num_sensor; i++) {
+			unsigned int raw = lvts_read_tc_msr_raw(
+				LVTSMSR0_0 + base + 0x4 * i);
+
+			if (raw && (!cur_msr_raw || raw < cur_msr_raw))
+				cur_msr_raw = raw;
+		}
+	} else {
+		cur_msr_raw = lvts_read_tc_msr_raw(
+			LVTSMSR0_0 + base + 0x4 * d_index);
+	}
+	if (msr_raw < LVTS_PROT_RAW_MIN || msr_raw > MRS_RAW_MASK ||
+	    !cur_msr_raw ||
+	    msr_raw + LVTS_PROT_RAW_MARGIN > cur_msr_raw) {
+		dev_err(lvts_data->dev,
+			"LVTS%d: refusing to arm HW thermal reboot (threshold raw %#x, live raw %#x)\n",
+			tc_id, msr_raw, cur_msr_raw);
+		return;
+	}
+
+	dev_info(lvts_data->dev,
+		 "LVTS%d: arming HW thermal reboot at %d mC (threshold raw %#x, live raw %#x)\n",
+		 tc_id, trip_point, msr_raw, cur_msr_raw);
+
 	if (lvts_data->enable_dump_log) {
 		/* high offset INT */
 		writel(msr_raw, LVTSOFFSETH_0 + base);
@@ -1026,6 +1068,37 @@ static void set_all_tc_hw_reboot(struct lvts_data *lvts_data)
 		set_tc_hw_reboot_threshold(lvts_data, trip_point, i);
 	}
 }
+
+static int arm_hw_reboot_set(const char *val, const struct kernel_param *kp)
+{
+	bool on;
+	int ret;
+
+	ret = kstrtobool(val, &on);
+	if (ret)
+		return ret;
+
+	arm_hw_reboot = on;
+
+	/* Re-arm on the live device so the write can be observed safely. */
+	if (lvts_data_ref && lvts_data_ref->init_done)
+		set_all_tc_hw_reboot(lvts_data_ref);
+
+	return 0;
+}
+
+static const struct kernel_param_ops arm_hw_reboot_ops = {
+	.set = arm_hw_reboot_set,
+	.get = param_get_bool,
+};
+
+/*
+ * Arm (or leave alone) the LVTS hardware thermal-reboot protection. Arming it
+ * with a wrong threshold resets the SoC instantly and silently, so
+ * set_tc_hw_reboot_threshold() refuses any threshold that is not clearly below
+ * the count the hardware is reporting at that moment.
+ */
+module_param_cb(arm_hw_reboot, &arm_hw_reboot_ops, &arm_hw_reboot, 0644);
 
 static void update_all_tc_hw_reboot_point(struct lvts_data *lvts_data,
 	int trip_point)
@@ -1148,11 +1221,13 @@ static int lvts_init(struct lvts_data *lvts_data)
 
 	if (!force_hw_init) {
 		/*
-		 * The vendor's own init sequence does not reproduce the
-		 * bootloader's LVTS state here: the sensing points then report
-		 * garbage (-68 C and +125 C have both been observed), which
-		 * would drive the software critical trip. Refuse to register
-		 * the zones instead of publishing bad temperatures.
+		 * The vendor's own init sequence does not reproduce what the
+		 * bootloader sets up here: forced through it, the zones report
+		 * garbage (-68 C and +125 C have both been measured) which
+		 * would drive the software critical trip. The exact divergence
+		 * is not established, and the bootloader's own register state
+		 * is the only known-good configuration, so refuse rather than
+		 * publish bad temperatures.
 		 */
 		dev_err(dev,
 			"LVTS was not initialised by the bootloader, refusing to probe (force_hw_init=1 to force)\n");
@@ -1603,6 +1678,8 @@ static int lvts_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	lvts_data_ref = lvts_data;
+
 	return 0;
 }
 
@@ -1611,6 +1688,9 @@ static void lvts_remove(struct platform_device *pdev)
 	struct lvts_data *lvts_data;
 
 	lvts_data = (struct lvts_data *) platform_get_drvdata(pdev);
+
+	if (lvts_data_ref == lvts_data)
+		lvts_data_ref = NULL;
 
 	lvts_close(lvts_data);
 }
