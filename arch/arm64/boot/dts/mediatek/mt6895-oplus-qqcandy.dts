@@ -1,0 +1,1875 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * MT6895 (MediaTek Dimensity 8100) oplus "qqcandy" board:
+ *   OPPO K10 (project 21143) / OnePlus Ace Racing Edition (project 22801).
+ * Both projects share the same dtsi set in the OSS tree (only the camera
+ * cust dtsi differs); this file is written against that union with 22801
+ * as the primary reference.
+ *
+ * Sources (all values carry a per-line provenance comment):
+ *   - OSS overlay: .qqcandy-ref/kernel/arch/arm64/boot/dts/mediatek/
+ *       oplus6895_22801.dts (+ oplus6895_21143.dts, near-identical)
+ *   - OSS base:    same dir mt6895.dts (~14k lines), PMIC defaults
+ *       mt6363.dtsi / mt6368.dtsi
+ *   - Porting spec: .qqcandy-ref/PORTING_SPEC.md (cross-checked rev,
+ *       187 lines; sections 0/3/5/7 are quoted below as "SPEC §n")
+ *   - Host tree baseline: mt6895.dtsi / mt6895-xiaomi-xaga.dts
+ *
+ * Ground truth of the real device (SPEC §0):
+ *   - cmdline: lcm=1-oplus21143_tianma_nt36672c_dsi_vdo_lcm_drv-fps=11976
+ *              nf_nt36672c (NT36672C TDDI panel + SPI touch, same die)
+ *   - MT6375 charger/gauge on i2c bus @11280000, address 0x34
+ *   - rails actually referenced by the board: mt6368_vio28/vmc/vtp,
+ *     mt6363_vufs18 (panel IO)
+ *   - no UART console (LK disables it): ramoops @0x48090000 size 0xe0000,
+ *     hot-reboot verified, is the primary debug channel
+ *
+ * M1 scope: basic boot. Display/touch/peripherals land in M2-M4 and are
+ * kept as commented placeholders with their verified facts.
+ */
+
+/dts-v1/;
+#include "mt6895.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "OPPO K10 / OnePlus Ace Racing Edition (oplus qqcandy)";
+	chassis-type = "handset";
+	compatible = "oplus,qqcandy", "mediatek,mt6895";
+
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	aliases {
+		serial0 = &uart0;
+		serial1 = &uart1;
+		/*
+		 * Pin the i2c aliases so userspace sees the stock bus numbers
+		 * (same trick as xaga dts:21-27). Ground truth: mt6375 sits on
+		 * the 11280000 controller (= i2c5 here) at 0x34; the AW8697
+		 * haptic sits on 11d04000 (= i2c7) at 0x5A (22801:352).
+		 */
+		i2c1 = &i2c1;
+		i2c5 = &i2c5;
+		i2c7 = &i2c7;
+	};
+
+	chosen: chosen {
+		/*
+		 * qqcandy: this board always boots from UFS. The 5.10 UFS
+		 * driver reads atag,boot from /chosen to set boot_device
+		 * (struct tag_bootmode: size, tag, bootmode, boottype).
+		 * boottype=2 means BOOTDEV_UFS.
+		 */
+		atag,boot = <0 0 0 2>;
+		/*
+		 * Style kept from the stock overlays (bootargs_ext,
+		 * oplus6895_22801.dts:23-28: console=tty0 root=/dev/ram
+		 * loglevel=8 initcall_debug=1 -- there is NO UART console).
+		 * clk_ignore_unused: clocks are LK-managed / stubbed in this
+		 * tree (mt6895.dtsi:222-244 comments), same reason xaga keeps
+		 * it. printk.devkmsg + log_buf_len=2M: keep verbose early logs
+		 * for the ramoops channel (xaga dts:30-43 rationale).
+		 */
+		bootargs = "console=tty0 root=/dev/ram loglevel=8 initcall_debug=1 clk_ignore_unused printk.devkmsg=on log_buf_len=2M";
+		/*
+		 * Hardware UART console (bring-up): OPPO routes a debug uart
+		 * through the Type-C SBU pins behind mtk_printk_ctrl
+		 * .disable_uart (=0 injected in setup.c). stdout-path gives us
+		 * earlycon + preferred console on 11002000; setup.c appends
+		 * console=ttyS0 as well so late console lands there too.
+		 */
+		stdout-path = "serial0:115200n8";
+
+		/*
+		 * atag,videolfb (M2): raw struct tag_videolfb bytes
+		 * (mtk_drm_fbdev.h: u64 fb_base, u32 islcmfound,
+		 * u32 fps x100, u32 vram, char lcmname[]). Values are the
+		 * same live LK dumps the simplefb node was written from:
+		 * fb_base=0xfe1af000, vram=0x1e50000 (full triple buffer,
+		 * matches mblock-xx reservation), fps=11976 (~120Hz),
+		 * islcmfound=1, panel NT36672C. Vendor DRM's fbdev then
+		 * adopts LK's scanout buffer (mtk_drm_fb_gem_insert)
+		 * instead of allocating a fresh one, so the console stays
+		 * on the surface LK hardware keeps scanning out.
+		 */
+		atag,videolfb = [00 f0 1a fe 00 00 00 00
+				 01 00 00 00
+				 88 2e 00 00
+				 00 00 e5 01
+				 4e 54 33 36 36 37 32 43 00];
+	};
+
+	/* USB gadget 3.3V rail (mtu3 requires vusb33-supply; LK powers it).
+	 * Same stub as xaga dts:62-68. */
+	vusb33: regulator-vusb33 {
+		compatible = "regulator-fixed";
+		regulator-name = "vusb33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	memory {
+		device_type = "memory";
+		/*
+		 * Verified against the live device's LK FDT dump: single
+		 * 8 GiB bank @0x40000000 (mblock_info confirms the same
+		 * layout). LK still fixes this up per boot, so it also
+		 * tolerates other RAM configs of the same family.
+		 */
+		reg = <0x0 0x40000000 0x2 0x0>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * pstore/ramoops -- the ONLY verified reservation for this
+		 * board (SPEC §0: hot-reboot proven @0x48090000, size
+		 * 0xe0000). Split mirrors the xaga pattern (xaga dts:336-344)
+		 * which matches downstream Android configs.
+		 */
+		ramoops@48090000 {
+			compatible = "ramoops";
+			reg = <0x00 0x48090000 0x00 0xe0000>;
+			record-size = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x10000>;
+			ecc-size = <0>;
+			no-map;
+		};
+
+		/*
+		 * The remaining mblock reservations are transplanted verbatim
+		 * from the live device's LK FDT dump (qqcandy-mblock.dtsi,
+		 * 44 regions / ~609 MiB incl. TEE/GZ/BL31/SCP/modem/ADSP/APU/
+		 * consys/framebuffer). mblock-10-pstore is omitted there --
+		 * the ramoops@48090000 node above covers that exact range.
+		 */
+#include "qqcandy-mblock.dtsi"
+	};
+
+	/*
+	 * M2 placeholder -- display bring-up facts (do not lose):
+	 *
+	 * Panel: Tianma NT36672C TDDI VDO LCD.
+	 * compatible = "oplus21143,tianma,nt36672c,vdo"
+	 *   (5.10 drivers/gpu/drm/panel/oplus21143_tianma_nt36672c_dsi_vdo.c,
+	 *   registered via mipi_dsi_driver_register :2672; probe does an
+	 *   of_graph remote self-check against dsi_out and returns -ENODEV
+	 *   if not itself -> dual-panel coexistence selection :2528-2543).
+	 * Wiring (22801 overlay :840-858): reset-gpios = pio41,
+	 * bias-gpios = pio120/pio119 (AVDD/AVEE emulated as GPIOs, NOT
+	 * LDOs; vmcldo/vmchldo supplies were commented out upstream),
+	 * DSI_TE = pio40 (pinctrl mode_te_te, 21143:699-703).
+	 * Supply: vufsldo-supply = <&mt6363_vufs18> (22801:850; rail added
+	 * under &mt6363 below).
+	 * Backlight: no backlight IC -- DCS 0x51 three-byte direct write
+	 * (:1783-1797); 12-bit HW max 4095, normal ceiling
+	 * MAX_NORMAL_BRIGHTNESS = 3276; 7 multi-FPS ext_params
+	 * (120/90/60/50/48/45/30 Hz, data_rate=1100, 120Hz clock=373794,
+	 * :1028-1060); single jdi_panel_init() inline DCS sequence (:458);
+	 * ESD check reads 0x0A expecting 0x9C; lane_swap table :1099-1104
+	 * must be preserved in the M2 port.
+	 *
+	 * The xaga panel stub below (dsi0/panel@1, defined inside
+	 * mt6895.dtsi:2203-2216 with the l16 DSC panel + vrf18_reg stub) is
+	 * disabled here; its DRM_PANEL_L16 driver is also switched off in
+	 * qqcandy.config. The M2 panel node goes in its place, wired to
+	 * dsi_out via of_graph.
+	 */
+
+	/*
+	 * M2 placeholder -- touchscreen facts:
+	 * NT36672C TDDI touch, same die as the panel, on SPI2:
+	 * &spi2 { touchscreen@0 { compatible = "oplus,tp_noflash"; ... } }
+	 * (22801:498-556): 9.6 MHz, chip-name="NF_NT36672C","ILI7807S",
+	 * reset-gpio = pio212, irq = pio135, CS within pins
+	 * SPI2_A_MI/CSB/MO/CLK = pio109/110/111/112 (:611-616),
+	 * touchpanel,tx-rx-num = <18 36>, display-coords 1080x2412.
+	 * Firmware: factory FW is EMBEDDED as firmware-data-0 arrays in
+	 * oplus-21143-tp.dtsi (8711 lines); firmware_name="0xAA348NT00" is
+	 * a directory name, not a .img. Driver plan (SPEC §4): vendor v2
+	 * framework port; note mainline nt36xxx.c is an SPI driver
+	 * ("novatek,NVT-ts-spi") whose mem_map already covers this chip ID.
+	 * spi2 stays disabled until then (its dtsi child novatek@0 is the
+	 * xaga NT36672E touch and must not bind).
+	 */
+	/*
+	 * Connectivity (M3 pulled forward -- conninfra probe sets g_hw_init_done,
+	 * without this node its init spins forever spamming fbcon).
+	 * Nodes copied from xaga dts:356-400 (downstream mt6895.dts origin);
+	 * memory-region labels added on our mblock regions. TODO(M3):
+	 * flavor_bin / ANTSEL pinctrl must be re-derived for qqcandy antenna
+	 * config, not cloned (SPEC R3); connfem node deferred to M3.
+	 */
+	consys: consys@18000000 {
+		compatible = "mediatek,mt6895-consys";
+		#thermal-sensor-cells = <0>;
+		reg = <0x00 0x10001000 0x00 0xee4 0x00 0x10005000 0x00 0xa78
+		       0x00 0x11c30000 0x00 0xa14 0x00 0x11ea0000 0x00 0xa04
+		       0x00 0x18000000 0x00 0x470 0x00 0x18001000 0x00 0x658
+		       0x00 0x18003000 0x00 0x204 0x00 0x1800e000 0x00 0x124
+		       0x00 0x18011000 0x00 0x138 0x00 0x18012000 0x00 0x98
+		       0x00 0x18020000 0x00 0x4c 0x00 0x18023000 0x00 0xe28
+		       0x00 0x1803b000 0x00 0x18 0x00 0x18040000 0x00 0x2c
+		       0x00 0x18041000 0x00 0x128 0x00 0x18042000 0x00 0x324
+		       0x00 0x1804b000 0x00 0x414 0x00 0x1804d000 0x00 0x41c
+		       0x00 0x1804f000 0x00 0x148 0x00 0x18053800 0x00 0x1000
+		       0x00 0x18060000 0x00 0xc08 0x00 0x18070000 0x00 0x8004
+		       0x00 0x1c001000 0x00 0xfb0 0x00 0x1c007000 0x00 0x51c>;
+		power-domains = <&spm MT6895_POWER_DOMAIN_CONN>;
+		mt6363_vcn13-supply = <&mt6363_vcn13>;
+		mt6363_vrfio18-supply = <&mt6363_vrfio18>;
+		mt6368_vcn33_1-supply = <&mt6368_vcn33_1>;
+		mt6368_vcn33_2-supply = <&mt6368_vcn33_2>;
+		mt6368_vant18-supply = <&mt6368_vant18>;
+		memory-region = <&consys_reserved>;
+		emi-addr = <0>;
+		emi-size = <0x7e0000>;
+		emi-alignment = <0x100000>;
+		emi-max-addr = <0x90000000>;
+		tcxo_support = "false";
+		scp-shm-addr = <0>;
+		scp-shm-size = <0x20000>;
+		status = "okay";
+	};
+
+	wifi: wifi@18000000 {
+		compatible = "mediatek,wifi";
+		reg = <0x0 0x18000000 0x0 0x700000>;
+		interrupts = <GIC_SPI 522 IRQ_TYPE_LEVEL_HIGH 0>,
+			     <GIC_SPI 537 IRQ_TYPE_LEVEL_HIGH 0>;
+		memory-region = <&wifi_reserved>;
+		flavor_bin = "b"; /* qqcandy vendor firmware only ships 1b/1c; use 1b */
+		emi-addr = <0>;
+		emi-size = <0x1400000>;
+		emi-alignment = <0x1000000>;
+		emi-max-addr = <0xC0000000>;
+		/*
+		 * Factory MAC of this unit, read at runtime from the partition the
+		 * vendor stack keeps it in -- no address is hardcoded here. The chip
+		 * firmware reports an address of its own in the NIC capability
+		 * event (fc:d9:08:8a:9d:91 on this board, not what is on the box);
+		 * downstream nvram_daemon overrides it from
+		 * /nvdata/APCFG/APRDEB/WIFI, which is mirrored at a fixed offset in
+		 * proinfo. See the proinfo_nvmem node.
+		 */
+		nvmem-cells = <&wifi_mac>;
+		nvmem-cell-names = "mac-address";
+		status = "okay";
+	};
+
+	/*
+	 * Per-unit data that the bootloader does not patch into DT. proinfo has
+	 * no filesystem, so the addresses sit at fixed offsets and can be read
+	 * as plain nvmem cells:
+	 *
+	 *   0x68  6 bytes  Bluetooth BD_ADDR   (2c:a7:ef:46:96:d6 on this unit)
+	 *   0x6e  6 bytes  WiFi MAC            (…d7, one more than the BD_ADDR)
+	 *
+	 * Both are byte-for-byte copies of /nvdata/APCFG/APRDEB/{BT_Addr,WIFI+4},
+	 * which is what the vendor userspace daemon reads.
+	 */
+	proinfo_nvmem: nvmem {
+		compatible = "mediatek,partition-nvmem";
+		partition-label = "proinfo";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		bt_bdaddr: bd-address@68 {
+			reg = <0x68 6>;
+		};
+
+		wifi_mac: mac-address@6e {
+			reg = <0x6e 6>;
+		};
+	};
+
+	connfem: connfem@18000000 {
+		compatible = "mediatek,mt6895-connfem";
+		pinctrl-names = "wlan7207h_wlan7207c",
+				"wlan7207h_wlan7205c",
+				"qm42195_qm45197";
+		pinctrl-0 = <&wlan7207h_wf0>, <&wlan7207h_wf1>,
+			    <&wlan7207c_wf0>, <&wlan7207c_wf1>;
+		pinctrl-1 = <&wlan7207h_wf0>, <&wlan7207h_wf1>,
+			    <&wlan7205c_wf0>, <&wlan7205c_wf1>;
+		pinctrl-2 = <&qm42195_wf0>, <&qm42195_wf1>,
+			    <&qm45197_wf0>, <&qm45197_wf1>;
+		status = "okay";
+
+		epa_elna_mtk {
+			parts = <&nofem &nofem>,
+				<&wlan7207h &wlan7207c>,
+				<&wlan7207h &wlan7207c>,
+				<&wlan7207h &wlan7207c>,
+				<&wlan7207h &wlan7207c>,
+				<&wlan7207h &wlan7205c>,
+				<&wlan7207h &wlan7205c>,
+				<&wlan7207h &wlan7205c>,
+				<&wlan7207h &wlan7205c>,
+				<&qm42195 &qm45197>,
+				<&qm42195 &qm45197>,
+				<&qm42195 &qm45197>,
+				<&qm42195 &qm45197>;
+
+			bt {
+				flags-12 { epa_elna; };
+				flags-11 { bypass; };
+				flags-10 { epa_elna; };
+				flags-9 { bypass; };
+				flags-8 { epa_elna; };
+				flags-7 { bypass; };
+				flags-6 { epa_elna; };
+				flags-5 { bypass; };
+				flags-4 { epa_elna; };
+				flags-3 { bypass; };
+				flags-2 { epa_elna; };
+				flags-1 { bypass; };
+			};
+
+			wifi {
+				flags-10 { open-loop; };
+				flags-9 { open-loop; };
+				flags-6 { open-loop; };
+				flags-5 { open-loop; };
+				flags-2 { open-loop; };
+				flags-1 { open-loop; };
+			};
+		};
+
+		nofem: nofem {
+			vid = <0>;
+			pid = <0>;
+		};
+
+		wlan7207h: wlan7207h {
+			vid = <2>;
+			pid = <4>;
+		};
+
+		wlan7205c: wlan7205c {
+			vid = <2>;
+			pid = <5>;
+		};
+
+		wlan7207c: wlan7207c {
+			vid = <2>;
+			pid = <7>;
+		};
+
+		qm42195: qm42195 {
+			vid = <3>;
+			pid = <1>;
+		};
+
+		qm45197: qm45197 {
+			vid = <3>;
+			pid = <2>;
+		};
+	};
+
+	/*
+	 * simple-framebuffer over the LK scanout layer: fbcon on screen before
+	 * the real DRM panel driver lands (M2), the xaga console trick for
+	 * UART-less devices. Address/size from live atag,videolfb
+	 * (fb_base=0xfe1af000, vramSize=0x1e50000); 1080x2412 NT36672C panel,
+	 * stride follows the family's 1088-pixel alignment. Region is no-map
+	 * via qqcandy-mblock.dtsi.
+	 */
+	simplefb@fe1af000 {
+		compatible = "simple-framebuffer";
+		reg = <0x0 0xfe1af000 0x0 0xa3f000>;
+		width = <1080>;
+		height = <2412>;
+		stride = <(1088 * 4)>;
+		format = "a8r8g8b8";
+
+		display-timing {
+			width-mm = <76>;
+			height-mm = <168>;
+		};
+	};
+
+	/*
+	 * Volume-down key. Unlike the volume-up/power pair (MT6363 PMIC, see
+	 * &mt6363keys) this button is not wired to the SoC KPD row/col matrix
+	 * at all: stock routes it through a plain GPIO EINT. Official dtbo
+	 * fragment@72/73/74 (dtbo.img entry 0):
+	 *   kpd_volume_down { compatible = "mediatek, VOLUME_DOWN-eint";
+	 *                     interrupt-parent = <&pio>;
+	 *                     interrupts = <0x7f 0x02 0x7f 0x00>; }
+	 *   keypad,volume-down = <&pio>, <0x7f 0x00>;
+	 *   volume_down@0 { pins_cmd_dat { pinmux = <0x7f00>; input-enable; } }
+	 * i.e. GPIO127 (0x7f) in func0, input, active-low. Confirmed on the
+	 * live device: sampling the GPIO127 input bit every 6 ms gives clean
+	 * 1->0->1 transitions matching each physical press, while KP_MEM1..5
+	 * stay 0xffff and the mtk-kpd IRQ count stays 0.
+	 */
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&volume_down_pins>;
+
+		key-volume-down {
+			label = "Volume Down";
+			gpios = <&pio 127 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <32>;
+		};
+	};
+
+	sound {
+		compatible = "mediatek,mt6895-mt6368-sound";
+		mediatek,platform = <&afe>;
+		mediatek,headset-codec = <&mt6368codec>;
+		mediatek,spk-i2s = <3 9>;
+
+		mediatek,speaker-codec {
+			sound-dai = <&speaker_amp_l>, <&speaker_amp_r>;
+		};
+	};
+};
+
+/*
+ * UARTs kept alive even though LK gates the serial console off (SPEC §0);
+ * nodes cost nothing and give earlycon a path if a debug cable ever lands.
+ * RX/TX only on purpose: UCTS0/URTS0 would mux GPIO119/120 which this
+ * board uses as the panel AVDD/AVEE bias GPIOs (22801:846-849).
+ * Pin functions: mt6895-pinfunc.h:570/578 (URXD0/UTXD0 = gpio88/89),
+ * :587/596 (URXD1/UTXD1 = gpio90/91).
+ */
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pins>;
+	status = "okay";
+};
+
+&pio {
+	uart0_pins: uart0-pins {
+		pins_rx_tx {
+			pinmux = <PINMUX_GPIO88__FUNC_URXD0>,
+				 <PINMUX_GPIO89__FUNC_UTXD0>;
+			bias-pull-up;
+		};
+	};
+
+	uart1_pins: uart1-pins {
+		pins_rx_tx {
+			pinmux = <PINMUX_GPIO90__FUNC_URXD1>,
+				 <PINMUX_GPIO91__FUNC_UTXD1>;
+			bias-pull-up;
+		};
+	};
+
+	/*
+	 * DSI_TE: panel TE pin (stock 22801 "mode_te_te" state, 22801:701-703),
+	 * muxed when the panel device binds; plain GPIO bias only for
+	 * reset(41)/AVDD(120)/AVEE(119), no pinctrl needed for those.
+	 */
+	dsi_te_pins: dsi-te-pins {
+		pins_te {
+			pinmux = <PINMUX_GPIO40__FUNC_DSI_TE>;
+		};
+	};
+
+	/*
+	 * Volume-down EINT pad: func0 + input, pull-up. Matches the stock
+	 * "volume_down_as_int" state (official dtbo fragment@74) and the
+	 * pad state LK already leaves behind (ies=1, pullen=1, pullup=1).
+	 */
+	volume_down_pins: volume-down-pins {
+		pins_key {
+			pinmux = <PINMUX_GPIO127__FUNC_GPIO127>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	/* LCD LED backlight enable (5.10 oplus6895_21143.dts:705-714) */
+	lcm_led_en_pins: lcm-led-en-pins {
+		pins_led_en {
+			pinmux = <PINMUX_GPIO215__FUNC_GPIO215>;
+			slew-rate = <1>;
+			output-high;
+		};
+	};
+};
+
+/*
+ * PMIC keys: align long-press behaviour with the OSS default
+ * (long-press-mode=<2>, power-off-time-sec=<1>, mt6363.dtsi:107-120)
+ * instead of the xaga values baked into mt6895.dtsi.
+ */
+&mt6363keys {
+	mediatek,long-press-mode = <2>;
+	power-off-time-sec = <1>;
+};
+
+/*
+ * ------------------------------------------------------------------
+ * MT6363 (main PMIC, SPMI slave 4) - full rail set.
+ * Baseline: mt6895.dtsi already defines VBUCK2/VBUCK4/VCN13/VRFIO18;
+ * those four stay untouched (the 5.10 board overlays never override
+ * them). Every rail below is added verbatim from the OSS defaults with
+ * its source line, plus the base-dts always-on overrides
+ * (mt6895.dts:13744-13795).
+ * ------------------------------------------------------------------
+ */
+&mt6363 {
+	regulators {
+		/* mt6363.dtsi:123-131 */
+		mt6363_vs2: VS2 {
+			regulator-compatible = "VS2";
+			regulator-name = "mt6363_vs2";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1600000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:132-139 + always-on mt6895.dts:13744 */
+		mt6363_vbuck1: VBUCK1 {
+			regulator-compatible = "VBUCK1";
+			regulator-name = "mt6363_vbuck1";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:148-155 */
+		mt6363_vbuck3: VBUCK3 {
+			regulator-compatible = "VBUCK3";
+			regulator-name = "mt6363_vbuck3";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <200>;
+			regulator-allowed-modes = <0 1 2>;
+		};
+
+		/* mt6363.dtsi:164-171 + always-on mt6895.dts:13756 */
+		mt6363_vbuck5: VBUCK5 {
+			regulator-compatible = "VBUCK5";
+			regulator-name = "mt6363_vbuck5";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <200>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:172-179 + always-on mt6895.dts:13760 */
+		mt6363_vbuck6: VBUCK6 {
+			regulator-compatible = "VBUCK6";
+			regulator-name = "mt6363_vbuck6";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <300>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:180-187 */
+		mt6363_vbuck7: VBUCK7 {
+			regulator-compatible = "VBUCK7";
+			regulator-name = "mt6363_vbuck7";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <300>;
+			regulator-allowed-modes = <0 1 2>;
+		};
+
+		/* mt6363.dtsi:188-196 */
+		mt6363_vs1: VS1 {
+			regulator-compatible = "VS1";
+			regulator-name = "mt6363_vs1";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <2200000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:197-205 */
+		mt6363_vs3: VS3 {
+			regulator-compatible = "VS3";
+			regulator-name = "mt6363_vs3";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:206-213 + always-on mt6895.dts:13764 */
+		mt6363_vsram_digrf: VSRAM_DIGRF {
+			regulator-compatible = "VSRAM_DIGRF";
+			regulator-name = "mt6363_vsram_digrf";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:214-221 */
+		mt6363_vsram_mdfe: VSRAM_MDFE {
+			regulator-compatible = "VSRAM_MDFE";
+			regulator-name = "mt6363_vsram_mdfe";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:222-229 + always-on mt6895.dts:13768 */
+		mt6363_vsram_modem: VSRAM_MODEM {
+			regulator-compatible = "VSRAM_MODEM";
+			regulator-name = "mt6363_vsram_modem";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:230-237 + always-on mt6895.dts:13772 */
+		mt6363_vsram_cpub: VSRAM_CPUB {
+			regulator-compatible = "VSRAM_CPUB";
+			regulator-name = "mt6363_vsram_cpub";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:238-245 + always-on mt6895.dts:13776 */
+		mt6363_vsram_cpum: VSRAM_CPUM {
+			regulator-compatible = "VSRAM_CPUM";
+			regulator-name = "mt6363_vsram_cpum";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:246-253 + always-on mt6895.dts:13780 */
+		mt6363_vsram_cpul: VSRAM_CPUL {
+			regulator-compatible = "VSRAM_CPUL";
+			regulator-name = "mt6363_vsram_cpul";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:254-261 */
+		mt6363_vsram_apu: VSRAM_APU {
+			regulator-compatible = "VSRAM_APU";
+			regulator-name = "mt6363_vsram_apu";
+			regulator-min-microvolt = <400000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:262-269; UFS vcc on this SoC (mt6895.dts:5400) */
+		mt6363_vemc: VEMC {
+			regulator-compatible = "VEMC";
+			regulator-name = "mt6363_vemc";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:278-286 */
+		mt6363_vtref18: VTREF18 {
+			regulator-compatible = "VTREF18";
+			regulator-name = "mt6363_vtref18";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-enable-ramp-delay = <240>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:287-294 + always-on mt6895.dts:13792 */
+		mt6363_vaux18: VAUX18 {
+			regulator-compatible = "VAUX18";
+			regulator-name = "mt6363_vaux18";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-enable-ramp-delay = <240>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:295-302 */
+		mt6363_vcn15: VCN15 {
+			regulator-compatible = "VCN15";
+			regulator-name = "mt6363_vcn15";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/*
+		 * mt6363.dtsi:303-310. REQUIRED for M2: panel IO supply,
+		 * vufsldo-supply = <&mt6363_vufs18> (22801:850); also UFS
+		 * vccq2 (mt6895.dts:5402).
+		 */
+		mt6363_vufs18: VUFS18 {
+			regulator-compatible = "VUFS18";
+			regulator-name = "mt6363_vufs18";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:311-319 */
+		mt6363_vio18: VIO18 {
+			regulator-compatible = "VIO18";
+			regulator-name = "mt6363_vio18";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:320-327 + always-on mt6895.dts:13784 */
+		mt6363_vm18: VM18 {
+			regulator-compatible = "VM18";
+			regulator-name = "mt6363_vm18";
+			regulator-min-microvolt = <550000>;
+			regulator-max-microvolt = <1850000>;
+			regulator-enable-ramp-delay = <280>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:328-336 */
+		mt6363_va15: VA15 {
+			regulator-compatible = "VA15";
+			regulator-name = "mt6363_va15";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:337-344 */
+		mt6363_vrf18: VRF18 {
+			regulator-compatible = "VRF18";
+			regulator-name = "mt6363_vrf18";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:353-361 */
+		mt6363_vio075: VIO075 {
+			regulator-compatible = "VIO075";
+			regulator-name = "mt6363_vio075";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <800000>;
+			regulator-enable-ramp-delay = <3000>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:362-369; UFS vccq on this SoC (mt6895.dts:5401) */
+		mt6363_vufs12: VUFS12 {
+			regulator-compatible = "VUFS12";
+			regulator-name = "mt6363_vufs12";
+			regulator-min-microvolt = <550000>;
+			regulator-max-microvolt = <1850000>;
+			regulator-enable-ramp-delay = <280>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:370-378 */
+		mt6363_va12_1: VA12_1 {
+			regulator-compatible = "VA12_1";
+			regulator-name = "mt6363_va12_1";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:379-387 */
+		mt6363_va12_2: VA12_2 {
+			regulator-compatible = "VA12_2";
+			regulator-name = "mt6363_va12_2";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:388-395 + always-on mt6895.dts:13788 */
+		mt6363_vrf12: VRF12 {
+			regulator-compatible = "VRF12";
+			regulator-name = "mt6363_vrf12";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6363.dtsi:396-403 */
+		mt6363_vrf13: VRF13 {
+			regulator-compatible = "VRF13";
+			regulator-name = "mt6363_vrf13";
+			regulator-min-microvolt = <900000>;
+			regulator-max-microvolt = <1810000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:404-411 */
+		mt6363_vrf09: VRF09 {
+			regulator-compatible = "VRF09";
+			regulator-name = "mt6363_vrf09";
+			regulator-min-microvolt = <900000>;
+			regulator-max-microvolt = <1810000>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6363.dtsi:412-415; consumed by the pmic-auxadc imix path */
+		mt6363_isink_load: ISINK_LOAD {
+			regulator-compatible = "isink_load";
+			regulator-name = "mt6363_isink_load";
+		};
+	};
+};
+
+/*
+ * ------------------------------------------------------------------
+ * MT6368 (secondary PMIC, SPMI slave 5) - full rail set.
+ * Baseline: mt6895.dtsi defines VBUCK2/VCN33_1/VCN33_2/VANT18; those
+ * stay untouched. Board-overlay overrides applied where present:
+ * vio28 -> 3.0 V (22801:39-42), vmc -> 1.8 V boot-on (22801:640-645),
+ * vtp -> 3.0 V boot-on (22801:646-651). These three plus vfp are the
+ * rails the real device actually exercises (SPEC §0/§5).
+ * ------------------------------------------------------------------
+ */
+&mt6368 {
+	regulators {
+		/* mt6368.dtsi:111-118 */
+		mt6368_vbuck1: VBUCK1 {
+			regulator-compatible = "VBUCK1";
+			regulator-name = "mt6368_vbuck1";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <200>;
+			regulator-allowed-modes = <0 1 2>;
+		};
+
+		/* mt6368.dtsi:127-134 */
+		mt6368_vbuck3: VBUCK3 {
+			regulator-compatible = "VBUCK3";
+			regulator-name = "mt6368_vbuck3";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+		};
+
+		/* mt6368.dtsi:135-142 */
+		mt6368_vbuck4: VBUCK4 {
+			regulator-compatible = "VBUCK4";
+			regulator-name = "mt6368_vbuck4";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+		};
+
+		/* mt6368.dtsi:143-150 + always-on mt6895.dts:13800 */
+		mt6368_vbuck5: VBUCK5 {
+			regulator-compatible = "VBUCK5";
+			regulator-name = "mt6368_vbuck5";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6368.dtsi:151-158 + always-on mt6895.dts:13804 */
+		mt6368_vbuck6: VBUCK6 {
+			regulator-compatible = "VBUCK6";
+			regulator-name = "mt6368_vbuck6";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1193750>;
+			regulator-enable-ramp-delay = <180>;
+			regulator-allowed-modes = <0 1 2>;
+			regulator-always-on;
+		};
+
+		/* mt6368.dtsi:159-167; USB 3.3 supply ref mt6895.dts:9568 */
+		mt6368_vusb: VUSB {
+			regulator-compatible = "VUSB";
+			regulator-name = "mt6368_vusb";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6368.dtsi:168-175 + always-on mt6895.dts:13808 */
+		mt6368_vaux18: VAUX18 {
+			regulator-compatible = "VAUX18";
+			regulator-name = "mt6368_vaux18";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <3300000>;
+			regulator-enable-ramp-delay = <240>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6368.dtsi:176-183 */
+		mt6368_vrf13_aif: VRF13_AIF {
+			regulator-compatible = "VRF13_AIF";
+			regulator-name = "mt6368_vrf13_aif";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <200>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6368.dtsi:184-191 */
+		mt6368_vrf18_aif: VRF18_AIF {
+			regulator-compatible = "VRF18_AIF";
+			regulator-name = "mt6368_vrf18_aif";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <200>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6368.dtsi:200-207; vib-supply ref mt6895.dts:2821 */
+		mt6368_vibr: VIBR {
+			regulator-compatible = "VIBR";
+			regulator-name = "mt6368_vibr";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/*
+		 * mt6368.dtsi:208-216 (default always-on kept) + BOARD
+		 * OVERRIDE min/max = 3.0 V, oplus6895_22801.dts:39-42
+		 * (identical in 21143:39-42). Verified in use by the device.
+		 */
+		mt6368_vio28: VIO28 {
+			regulator-compatible = "VIO28";
+			regulator-name = "mt6368_vio28";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+			regulator-always-on;
+		};
+
+		/* mt6368.dtsi:217-224; fingerprint dvdd 3.3 V request
+		 * (22801:1124-1125 dvdd-config 3300000) fits the range. */
+		mt6368_vfp: VFP {
+			regulator-compatible = "VFP";
+			regulator-name = "mt6368_vfp";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/*
+		 * mt6368.dtsi:225-232 + BOARD OVERRIDE 3.0 V boot-on,
+		 * oplus6895_22801.dts:646-651 (touch panel supply).
+		 */
+		mt6368_vtp: VTP {
+			regulator-compatible = "VTP";
+			regulator-name = "mt6368_vtp";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+			regulator-boot-on;
+		};
+
+		/* mt6368.dtsi:233-240 */
+		mt6368_vmch: VMCH {
+			regulator-compatible = "VMCH";
+			regulator-name = "mt6368_vmch";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/*
+		 * mt6368.dtsi:241-248 + BOARD OVERRIDE 1.8 V boot-on,
+		 * oplus6895_22801.dts:640-645.
+		 */
+		mt6368_vmc: VMC {
+			regulator-compatible = "VMC";
+			regulator-name = "mt6368_vmc";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+			regulator-boot-on;
+		};
+
+		/* mt6368.dtsi:249-256 */
+		mt6368_vaud18: VAUD18 {
+			regulator-compatible = "VAUD18";
+			regulator-name = "mt6368_vaud18";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6368.dtsi:273-280 */
+		mt6368_vefuse: VEFUSE {
+			regulator-compatible = "VEFUSE";
+			regulator-name = "mt6368_vefuse";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6368.dtsi:281-288 */
+		mt6368_vmch_eint_high: VMCH_EINT_HIGH {
+			regulator-compatible = "VMCH_EINT_HIGH";
+			regulator-name = "mt6368_vmch_eint_high";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+
+		/* mt6368.dtsi:289-296 */
+		mt6368_vmch_eint_low: VMCH_EINT_LOW {
+			regulator-compatible = "VMCH_EINT_LOW";
+			regulator-name = "mt6368_vmch_eint_low";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3500000>;
+			regulator-enable-ramp-delay = <680>;
+			regulator-allowed-modes = <0 2>;
+		};
+	};
+};
+
+/*
+ * ------------------------------------------------------------------
+ * I2C layout aligned to the real device (ground truth SPEC §0/§6).
+ * ------------------------------------------------------------------
+ */
+
+/*
+ * i2c1 (11d00000): on qqcandy this bus hosts the SC8547 charge-pump
+ * master @0x6F (oplus_charge_21143.dtsi:339) -- M4, voocphy lives in the
+ * vendor-modules repo. The AW8697 node inherited from mt6895.dtsi belongs
+ * to XAGA (wrong bus AND wrong reset pin: GPIO117 is I2S0_DI on this
+ * board, 22801:266-273) -> disabled.
+ */
+&i2c1 {
+	aw8697@5a {
+		status = "disabled";
+	};
+};
+
+/*
+ * i2c7 (11d04000): hosts the AW8697(/AW86927?) haptic on qqcandy
+ * (22801:352-357: reg 0x5A, reset pio24, irq pio11). The bq28z610 fuel
+ * gauge inherited from mt6895.dtsi is xaga-only hardware (qqcandy gauges
+ * through the MT6375 FGM, SPEC §1 "无 bq27541") -> disabled; with it gone
+ * the bus can run 1 MHz as stock does (22801:349).
+ */
+&i2c7 {
+	clock-frequency = <1000000>;
+
+	fuel-gauge@55 {
+		status = "disabled";
+	};
+
+	haptic@5a {
+		compatible = "awinic,aw8697";
+		/*
+		 * Waveform/driver-strength parameters from the stock DT, by way
+		 * of the xaga port (same AW8697 silicon and the same RAM blob).
+		 * Without vib_effect_id_boundary the driver leaves
+		 * effect_id_boundary at 0, so it never advertises FF_PERIODIC
+		 * and the FF_RUMBLE loop path aims at effect 0 instead of the
+		 * continuous sine waveform.
+		 */
+		aw8697_vib_mode = <0>;
+		aw8697_vib_bst_vol_ram = <0x0e>;
+		aw8697_vib_bst_vol_rtp = <0x0e>;
+		aw8697_vib_bst_vol_default = <0x0e>;
+		aw8697_vib_bstdbg = <0x30 0xeb 0xd4 0x00 0x00 0x00>;
+		aw8697_vib_r_spare = <0x68>;
+		aw8697_vib_tset = <0x1a>;
+		aw8697_vib_f0_coeff = <0x104>;
+		aw8697_vib_f0_pre = <0x6a4>;
+		aw8697_vib_f0_cali_percen = <0x07>;
+		aw8697_vib_cont_drv_lev = <0x3c>;
+		aw8697_vib_cont_drv_lvl_ov = <0x3c>;
+		aw8697_vib_cont_td = <0xef>;
+		aw8697_vib_cont_zc_thr = <0x8f8>;
+		aw8697_vib_cont_num_brk = <0x03>;
+		aw8697_vib_bemf_config = <0x00 0x08 0x03 0xf8>;
+		aw8697_vib_f0_trace_parameter = <0x09 0x03 0x01 0x1f>;
+		vib_effect_id_boundary = <0x0a>;
+		vib_effect_max = <0xc5>;
+		/* OSS uses "awinic,aw8697_haptic" (OSS aw8697.c:10358);
+		 * the 6.18 driver (drivers/input/misc/aw8697.c:1583) binds
+		 * "awinic,aw8697" -- DTS follows the mainline string
+		 * (SPEC §6 notes the alias situation). */
+		reg = <0x5a>;
+		reset-gpios = <&pio 24 GPIO_ACTIVE_HIGH>; /* 22801:356 */
+		status = "okay";
+		/* IRQ wiring is pio11 (22801:357) but the 6.18 driver never
+		 * requests it; left out rather than claiming an unverified
+		 * trigger type. TODO(M3): tune waveform params from the
+		 * stock DT (qcom,device_id=815 hints AW86927 silicon). */
+	};
+};
+
+/*
+ * ------------------------------------------------------------------
+ * Display / touch stubs inherited from mt6895.dtsi -- disabled until
+ * M2 replaces them (facts kept in the placeholder comments above).
+ * ------------------------------------------------------------------
+ */
+
+/*
+ * dsi0/panel@1 is the xaga L16 DSC panel stub defined INSIDE
+ * mt6895.dtsi (dsi0@14017000). No L16 driver is built for this board,
+ * but disable the node anyway so nothing can ever bind it by accident;
+ * the qqcandy NT36672C panel node below takes its place.
+ */
+&dsi0 {
+	panel@1 {
+		status = "disabled";
+		/* Drop the stub's endpoint so no stale graph link to
+		 * dsi_out survives (it would trip a graph_endpoint
+		 * "not bidirectional" warning against our panel). */
+		/delete-node/ port;
+	};
+
+	/*
+	 * Tianma NT36672C VDO TDDI panel (qqcandy, 22801:840-858):
+	 * reset = pio41, AVDD = pio120 (bias index 0), AVEE = pio119
+	 * (bias index 1) -- GPIO-driven, not regulators; vufsldo rail
+	 * (mt6363_vufs18) is the panel IO supply. reg = <3> mirrors the
+	 * stock DSI virtual channel for this panel. The endpoint pair
+	 * closes the of_graph loop the panel driver's probe self-check
+	 * requires (dsi_out must point back at this node, 5.10 :2528-2543).
+	 */
+	panel@3 {
+		compatible = "oplus21143,tianma,nt36672c,vdo";
+		reg = <3>;
+		reset-gpios = <&pio 41 GPIO_ACTIVE_HIGH>;
+		leden-gpios = <&pio 215 GPIO_ACTIVE_HIGH>; /* LCD LED backlight enable */
+		backlight = <&backlight>;
+		bias-gpios = <&pio 120 GPIO_ACTIVE_HIGH>,
+			     <&pio 119 GPIO_ACTIVE_HIGH>;
+		vufsldo-supply = <&mt6363_vufs18>;
+		pinctrl-names = "default", "led_en";
+		pinctrl-0 = <&dsi_te_pins>;
+		pinctrl-1 = <&lcm_led_en_pins>;
+
+		port {
+			panel_in_tianma: endpoint {
+				remote-endpoint = <&dsi_out>;
+			};
+		};
+	};
+
+	/*
+	 * Re-point the DSI host endpoint (defined in mt6895.dtsi with
+	 * remote-endpoint = <&panel_ep>) at our panel; the xaga stub's
+	 * panel_ep stays parked on the disabled panel@1 node.
+	 */
+	port {
+		dsi_out: endpoint {
+			remote-endpoint = <&panel_in_tianma>;
+		};
+	};
+};
+
+/*
+ * spi2 carries the xaga NT36672E touch child (novatek@0) in mt6895.dtsi.
+ * This board's TP is the NT36672C TDDI touch running the vendor oplus
+ * framework -- keep the bus off (and its pinmux untouched) until the M2
+ * touchscreen node replaces it; see the M2 placeholder comment above
+ * for the verified wiring (cs pio110 / irq pio135 / reset pio212).
+ */
+&spi2 {
+	status = "disabled";
+};
+
+/*
+ * ------------------------------------------------------------------
+ * Storage / USB
+ * ------------------------------------------------------------------
+ */
+
+/*
+ * UFS (ufshci@112b0000, "mediatek,mt8183-ufshci") is enabled by
+ * mt6895.dtsi:1251-1264 in minimal form: clocks/regulators/resets are
+ * deliberately omitted and treated as optional because LK leaves UFS
+ * clocked and powered. Stock wires vcc=vemc / vccq=vufs12 /
+ * vccq2=vufs18 (mt6895.dts:5400-5402); leave the supplies unmanaged
+ * for M1 (same reasoning as the dtsi comment), revisit in M3 once the
+ * clock/reset plumbing exists.
+ */
+
+
+/* qqcandy backlight class shim; put it under soc so it gets a platform dev */
+&soc {
+backlight: backlight {
+compatible = "mediatek,lcd-backlight";
+label = "lcd-backlight";
+led_mode = <4>;
+pwm_config = <0 0 0 0 0>;
+max-brightness = <4095>;
+max-hw-brightness = <4095>;
+};
+};
+
+&ufshci {
+/* M3: 接上原厂 5.10 的 UFS 电源轨，vcc=vemc / vccq=vufs12 / vccq2=vufs18 */
+vcc-supply = <&mt6363_vemc>;
+vccq-supply = <&mt6363_vufs12>;
+vccq2-supply = <&mt6363_vufs18>;
+};
+
+/*
+ * USB: same wiring style as xaga dts:504-546. dr_mode=otg with manual
+ * role switch (no reliable Type-C attach detection yet); device default
+ * so gadget/adbd-style workflows work. The port endpoint closes the
+ * graph demanded by the tcpc connector child inside mt6895.dtsi
+ * (typec_con_hs <-> mtu3_hs_role_sw).
+ */
+&ssusb {
+	status = "okay";
+	dr_mode = "otg";
+	maximum-speed = "high-speed";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	vusb33-supply = <&vusb33>;
+	/* MT6375 charger OTG boost: mtu3 enables it when the role
+	 * switch flips to host so OTG devices get VBUS (xaga parity). */
+	vbus-supply = <&otg_vbus>;
+
+	port {
+		mtu3_hs_role_sw: endpoint {
+			remote-endpoint = <&typec_con_hs>;
+		};
+	};
+};
+
+&usb_host {
+	status = "okay";
+	role-switch-default-mode = "peripheral";
+	vusb33-supply = <&vusb33>;
+};
+
+&usbphy {
+	status = "okay";
+};
+
+/*
+ * Bring-up: watchdog node stays ENABLED - CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED
+ * makes the watchdog core feed any HW-running watchdog until userspace
+ * opens it. Fighting it (setup.c one-shot + periodic kills, v33-v35)
+ * did not stop the ~37 s resets, so feed instead.
+ */
+&watchdog {
+	status = "okay";
+};
+
+/*
+ * Bring-up: no GPU/GPUEB. expdb shows every silent reset is a
+ * 'watch dog timeout' whose wdt_isr dumps GPU/GPUEB state - the
+ * GPUEB handshake never completes on this port and a safety WDT in
+ * the SPM domain bites ~37 s after boot. Panel scanout (M2) does not
+ * need the GPU; re-enable when GPU bring-up starts.
+ */
+&gpu {
+	status = "okay";
+};
+
+&gpueb {
+	status = "okay";
+	gpueb_mem_addr = <0x0 0x7b900000>;
+	gpueb_mem_size = <0x0 0x200000>;
+};
+
+&u2port {
+	status = "okay";
+	/* TODO(M2/M3): eye-vrt/eye-term/discth tuning is board analog
+	 * data (xaga carries its own values at xaga dts:542-545); get the
+	 * qqcandy set from the stock DT before enabling HS stress
+	 * workloads. Defaults (untuned) are fine for basic enumeration. */
+};
+
+&pio {
+aud_clk_mosi_off: aud_clk_mosi_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO202__FUNC_GPIO202>;
+input-enable;
+bias-pull-down;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO203__FUNC_GPIO203>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_clk_mosi_on: aud_clk_mosi_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO202__FUNC_AUD_CLK_MOSI>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO203__FUNC_AUD_SYNC_MOSI>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_dat_mosi_off: aud_dat_mosi_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO204__FUNC_GPIO204>;
+input-enable;
+bias-pull-down;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO205__FUNC_GPIO205>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_dat_mosi_on: aud_dat_mosi_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO204__FUNC_AUD_DAT_MOSI0>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO205__FUNC_AUD_DAT_MOSI1>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_dat_mosi_ch34_off: aud_dat_mosi_ch34_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO206__FUNC_GPIO206>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_dat_mosi_ch34_on: aud_dat_mosi_ch34_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO206__FUNC_AUD_DAT_MOSI2>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_dat_miso0_off: aud_dat_miso0_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO209__FUNC_GPIO209>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_dat_miso0_on: aud_dat_miso0_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO209__FUNC_AUD_DAT_MISO0>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_dat_miso1_off: aud_dat_miso1_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO210__FUNC_GPIO210>;
+input-enable;
+bias-disable;
+};
+};
+
+aud_dat_miso1_on: aud_dat_miso1_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO210__FUNC_AUD_DAT_MISO1>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_dat_miso2_off: aud_dat_miso2_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO211__FUNC_GPIO211>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_dat_miso2_on: aud_dat_miso2_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO211__FUNC_AUD_DAT_MISO2>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+mtkaif_ul_off: mtkaif_ul_off {
+pins_clk {
+pinmux = <PINMUX_GPIO202__FUNC_GPIO202>, <PINMUX_GPIO203__FUNC_GPIO203>;
+input-enable;
+bias-pull-down;
+};
+pins_dat {
+pinmux = <PINMUX_GPIO209__FUNC_GPIO209>, <PINMUX_GPIO210__FUNC_GPIO210>;
+input-enable;
+bias-pull-down;
+};
+pins_dat_mosi {
+pinmux = <PINMUX_GPIO204__FUNC_GPIO204>, <PINMUX_GPIO205__FUNC_GPIO205>,
+	 <PINMUX_GPIO206__FUNC_GPIO206>;
+input-enable;
+bias-pull-down;
+};
+};
+
+mtkaif_ul_on: mtkaif_ul_on {
+pins_clk {
+pinmux = <PINMUX_GPIO202__FUNC_AUD_CLK_MOSI>, <PINMUX_GPIO203__FUNC_AUD_SYNC_MOSI>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_dat {
+pinmux = <PINMUX_GPIO209__FUNC_AUD_DAT_MISO0>, <PINMUX_GPIO210__FUNC_AUD_DAT_MISO1>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_dat_mosi {
+pinmux = <PINMUX_GPIO204__FUNC_AUD_DAT_MOSI0>, <PINMUX_GPIO205__FUNC_AUD_DAT_MOSI1>,
+	 <PINMUX_GPIO206__FUNC_AUD_DAT_MOSI2>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+mtkaif_dl_off: mtkaif_dl_off {
+pins_clk {
+pinmux = <PINMUX_GPIO202__FUNC_GPIO202>, <PINMUX_GPIO203__FUNC_GPIO203>;
+input-enable;
+bias-pull-down;
+};
+pins_dat {
+pinmux = <PINMUX_GPIO204__FUNC_GPIO204>, <PINMUX_GPIO205__FUNC_GPIO205>;
+input-enable;
+bias-pull-down;
+};
+pins_dat_ch34 {
+pinmux = <PINMUX_GPIO206__FUNC_GPIO206>;
+input-enable;
+bias-pull-down;
+};
+};
+
+mtkaif_dl_on: mtkaif_dl_on {
+pins_clk {
+pinmux = <PINMUX_GPIO202__FUNC_AUD_CLK_MOSI>, <PINMUX_GPIO203__FUNC_AUD_SYNC_MOSI>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_dat {
+pinmux = <PINMUX_GPIO204__FUNC_AUD_DAT_MOSI0>, <PINMUX_GPIO205__FUNC_AUD_DAT_MOSI1>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_dat_ch34 {
+pinmux = <PINMUX_GPIO206__FUNC_AUD_DAT_MOSI2>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+vow_dat_miso_off: vow_dat_miso_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO209__FUNC_GPIO209>;
+input-enable;
+bias-pull-down;
+};
+};
+
+vow_dat_miso_on: vow_dat_miso_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO209__FUNC_VOW_DAT_MISO>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+vow_clk_miso_off: vow_clk_miso_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO210__FUNC_GPIO210>;
+input-enable;
+bias-pull-down;
+};
+};
+
+vow_clk_miso_on: vow_clk_miso_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO210__FUNC_VOW_CLK_MISO>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_gpio_i2s0_off: aud_gpio_i2s0_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO23__FUNC_GPIO23>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_gpio_i2s0_on: aud_gpio_i2s0_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO23__FUNC_I2S0_DI>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+aud_gpio_i2s3_off: aud_gpio_i2s3_off {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO115__FUNC_GPIO115>;
+input-enable;
+bias-pull-down;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO116__FUNC_GPIO116>;
+input-enable;
+bias-pull-down;
+};
+pins_cmd3_dat {
+pinmux = <PINMUX_GPIO118__FUNC_GPIO118>;
+input-enable;
+bias-pull-down;
+};
+};
+
+aud_gpio_i2s3_on: aud_gpio_i2s3_on {
+pins_cmd1_dat {
+pinmux = <PINMUX_GPIO115__FUNC_I2S3_BCK>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_cmd2_dat {
+pinmux = <PINMUX_GPIO116__FUNC_I2S3_LRCK>;
+input-schmitt-enable;
+bias-disable;
+};
+pins_cmd3_dat {
+pinmux = <PINMUX_GPIO118__FUNC_I2S3_DO>;
+input-schmitt-enable;
+bias-disable;
+};
+};
+
+	wlan7207h_wf0: wlan7207h_wf0 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO176__FUNC_ANT_SEL0>,
+				<PINMUX_GPIO177__FUNC_ANT_SEL1>,
+				<PINMUX_GPIO178__FUNC_ANT_SEL2>,
+				<PINMUX_GPIO179__FUNC_ANT_SEL3>;
+			mapping = <0 3 0>,	/* ANTSEL 0 <-> PIN #3: C0 */
+				<1 2 0>,	/* ANTSEL 1 <-> PIN #2: C1 */
+				<2 4 0>,	/* ANTSEL 2 <-> PIN #4: C2 */
+				<3 11 0>;	/* ANTSEL 3 <-> VCTRL */
+		};
+	};
+
+	wlan7207h_wf1: wlan7207h_wf1 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO184__FUNC_ANT_SEL8>,
+				<PINMUX_GPIO185__FUNC_ANT_SEL9>,
+				<PINMUX_GPIO188__FUNC_ANT_SEL10>;
+			mapping = <8 0x83 0>,	/* ANTSEL  8 <-> PIN #3: C0 */
+				<9 0x82 0>,	/* ANTSEL  9 <-> PIN #2: C1 */
+				<10 0x84 0>;	/* ANTSEL 10 <-> PIN #4: C2 */
+		};
+	};
+
+	wlan7207c_wf0: wlan7207c_wf0 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO180__FUNC_ANT_SEL4>,
+				<PINMUX_GPIO76__FUNC_ANT_SEL20>,
+				<PINMUX_GPIO182__FUNC_ANT_SEL6>,
+				<PINMUX_GPIO183__FUNC_ANT_SEL7>;
+			mapping = <4 0x4A 0>,	/* ANTSEL  4 <-> PIN #12: C0 */
+				<20 0x4B 0>,	/* ANTSEL 20 <-> PIN #13: C1 */
+				<6 0x4C 0>,	/* ANTSEL  6 <-> PIN #14: C2 */
+				<7 0x41 0>;	/* ANTSEL  7 <-> PIN #11: C3 */
+		};
+	};
+
+	wlan7207c_wf1: wlan7207c_wf1 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO189__FUNC_ANT_SEL11>,
+				<PINMUX_GPIO77__FUNC_ANT_SEL21>,
+				<PINMUX_GPIO190__FUNC_ANT_SEL12>,
+				<PINMUX_GPIO181__FUNC_ANT_SEL5>;
+			mapping = <11 0xCA 0>,	/* ANTSEL 11 <-> PIN #12: C0 */
+				<21 0xCB 0>,	/* ANTSEL 21 <-> PIN #13: C1 */
+				<12 0xCC 0>,	/* ANTSEL 12 <-> PIN #14: C2 */
+				<5 0xC1 0>;	/* ANTSEL  5 <-> PIN #11: C3 */
+		};
+	};
+
+	wlan7205c_wf0: wlan7205c_wf0 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO180__FUNC_ANT_SEL4>,
+				<PINMUX_GPIO76__FUNC_ANT_SEL20>,
+				<PINMUX_GPIO182__FUNC_ANT_SEL6>,
+				<PINMUX_GPIO183__FUNC_ANT_SEL7>;
+			mapping = <4 0x4C 0>,	/* ANTSEL  4 <-> PIN #12: C0 */
+				<20 0x4D 0>,	/* ANTSEL 20 <-> PIN #13: C1 */
+				<6 0x4E 0>,	/* ANTSEL  6 <-> PIN #14: C2 */
+				<7 0x4B 0>;	/* ANTSEL  7 <-> PIN #11: C3 */
+		};
+	};
+
+	wlan7205c_wf1: wlan7205c_wf1 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO189__FUNC_ANT_SEL11>,
+				<PINMUX_GPIO77__FUNC_ANT_SEL21>,
+				<PINMUX_GPIO190__FUNC_ANT_SEL12>,
+				<PINMUX_GPIO181__FUNC_ANT_SEL5>;
+			mapping = <11 0xCC 0>,	/* ANTSEL 11 <-> PIN #12: C0 */
+				<21 0xCD 0>,	/* ANTSEL 21 <-> PIN #13: C1 */
+				<12 0xCE 0>,	/* ANTSEL 12 <-> PIN #14: C2 */
+				<5 0xCB 0>;	/* ANTSEL  5 <-> PIN #11: C3 */
+		};
+	};
+
+	qm42195_wf0: qm42195_wf0 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO176__FUNC_ANT_SEL0>,
+				<PINMUX_GPIO177__FUNC_ANT_SEL1>,
+				<PINMUX_GPIO178__FUNC_ANT_SEL2>,
+				<PINMUX_GPIO179__FUNC_ANT_SEL3>;
+			mapping = <0 3 0>,	/* ANTSEL 0 <-> PIN #3: PAEN */
+				<1 2 0>,	/* ANTSEL 1 <-> PIN #2: LNAEN */
+				<2 4 0>,	/* ANTSEL 2 <-> PIN #4: BTEN */
+				<3 11 0>;	/* ANTSEL 3 <-> VCTRL */
+		};
+	};
+
+	qm42195_wf1: qm42195_wf1 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO184__FUNC_ANT_SEL8>,
+				<PINMUX_GPIO185__FUNC_ANT_SEL9>,
+				<PINMUX_GPIO188__FUNC_ANT_SEL10>;
+			mapping = <8 0x83 0>,	/* ANTSEL  8 <-> PIN #3: PAEN */
+				<9 0x82 0>,	/* ANTSEL  9 <-> PIN #2: LNAEN */
+				<10 0x84 0>;	/* ANTSEL 10 <-> PIN #4: BTEN */
+		};
+	};
+
+	qm45197_wf0: qm45197_wf0 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO180__FUNC_ANT_SEL4>,
+				<PINMUX_GPIO76__FUNC_ANT_SEL20>,
+				<PINMUX_GPIO182__FUNC_ANT_SEL6>;
+			mapping = <4 0x4A 0>,	/* ANTSEL  4 <-> PIN #10: PAEN */
+				<20 0x4B 0>,	/* ANTSEL 20 <-> PIN #11: LNAEN */
+				<6 0x4C 0>;	/* ANTSEL  6 <-> PIN #12: SEL3 */
+		};
+	};
+
+	qm45197_wf1: qm45197_wf1 {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO189__FUNC_ANT_SEL11>,
+				<PINMUX_GPIO77__FUNC_ANT_SEL21>,
+				<PINMUX_GPIO190__FUNC_ANT_SEL12>;
+			mapping = <11 0xCA 0>,	/* ANTSEL 11 <-> PIN #10: PAEN */
+				<21 0xCB 0>,	/* ANTSEL 21 <-> PIN #11: LNAEN */
+				<12 0xCC 0>;	/* ANTSEL 12 <-> PIN #12: SEL3 */
+		};
+	};
+};
+
+/*
+ * ------------------------------------------------------------------
+ * Deferred peripherals (comment-only, keep the verified facts):
+ *
+ * NFC SN100(T), M3: nxp,pn544 @ i2c3 0x28, irq=pio143 ven=pio4
+ *   dnld=pio144 clkreq=pio194, eSE nxp,p61 @spi1
+ *   (nfc/mt6895_qqcandy_21143_sn100.dtsi:20-38); driver = small port of
+ *   OSS drivers/nfc/pn553-i2c/pn553.c (creates /dev/nq-nci, matches the
+ *   running device).
+ * SC8547 dual charge pumps, M4: master i2c1@0x6F
+ *   (oplus_charge_21143.dtsi:339), slave i2c0@0x6F (:580); voocphy
+ *   driver only exists in the vendor-modules repo.
+ * Audio TFA9874 stereo PA, M4: i2c6 (11281000) 0x34/0x35, resets
+ *   pio157/158 (22801:326-344); needs the mt6895 ASoC platform first.
+ * LCD-bias i2c9 node I2C_LCD_BIAS@3e (22801:809-814) NOT carried over:
+ *   the NT36672C backlight path is pure DCS 0x51, this node is unused
+ *   for it (SPEC §3.1).
+ * msdc/SD: stock leaves mmc1 status="disabled" (cust_mt6895_msdc.dtsi:12)
+ *   and the 6.18 mt6895.dtsi has no msdc nodes at all -> nothing to do.
+ * WiFi/BT/GPS consys nodes (xaga dts:357-481 style): M3 reuse -- copy
+ *   from xaga after checking flavor_bin (b_t vs this board) and keeping
+ *   THIS board's own connfem ANTSEL mapping (RF design differs; do not
+ *   clone xaga's pin mappings blindly). Drivers/configs stay enabled in
+ *   qqcandy.config meanwhile.
+ * ------------------------------------------------------------------
+ */
+
+/* TFA9874 smart amplifiers (Goodix), I2S3 data */
+&i2c6 {
+	speaker_amp_l: speaker_amp@34 {
+		compatible = "goodix,tfa9874";
+		reg = <0x34>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Left";
+		reset-gpio = <&pio 157 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	speaker_amp_r: speaker_amp@35 {
+		compatible = "goodix,tfa9874";
+		reg = <0x35>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Right";
+		reset-gpio = <&pio 158 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};
+
+&afe {
+	pinctrl-names = "aud_clk_mosi_off",
+			"aud_clk_mosi_on",
+			"aud_dat_mosi_off",
+			"aud_dat_mosi_on",
+			"aud_dat_mosi_ch34_off",
+			"aud_dat_mosi_ch34_on",
+			"aud_dat_miso0_off",
+			"aud_dat_miso0_on",
+			"aud_dat_miso1_off",
+			"aud_dat_miso1_on",
+			"aud_dat_miso2_off",
+			"aud_dat_miso2_on",
+			"vow_dat_miso_off",
+			"vow_dat_miso_on",
+			"vow_clk_miso_off",
+			"vow_clk_miso_on",
+			"aud_gpio_i2s3_off",
+			"aud_gpio_i2s3_on",
+			"aud_gpio_i2s0_off",
+			"aud_gpio_i2s0_on",
+			"mtkaif_ul_off",
+			"mtkaif_ul_on",
+			"mtkaif_dl_off",
+			"mtkaif_dl_on";
+	pinctrl-0 = <&aud_clk_mosi_off>;
+	pinctrl-1 = <&aud_clk_mosi_on>;
+	pinctrl-2 = <&aud_dat_mosi_off>;
+	pinctrl-3 = <&aud_dat_mosi_on>;
+	pinctrl-4 = <&aud_dat_mosi_ch34_off>;
+	pinctrl-5 = <&aud_dat_mosi_ch34_on>;
+	pinctrl-6 = <&aud_dat_miso0_off>;
+	pinctrl-7 = <&aud_dat_miso0_on>;
+	pinctrl-8 = <&aud_dat_miso1_off>;
+	pinctrl-9 = <&aud_dat_miso1_on>;
+	pinctrl-10 = <&aud_dat_miso2_off>;
+	pinctrl-11 = <&aud_dat_miso2_on>;
+	pinctrl-12 = <&vow_dat_miso_off>;
+	pinctrl-13 = <&vow_dat_miso_on>;
+	pinctrl-14 = <&vow_clk_miso_off>;
+	pinctrl-15 = <&vow_clk_miso_on>;
+	pinctrl-16 = <&aud_gpio_i2s3_off>;
+	pinctrl-17 = <&aud_gpio_i2s3_on>;
+	pinctrl-18 = <&aud_gpio_i2s0_off>;
+	pinctrl-19 = <&aud_gpio_i2s0_on>;
+	pinctrl-20 = <&mtkaif_ul_off>;
+	pinctrl-21 = <&mtkaif_ul_on>;
+	pinctrl-22 = <&mtkaif_dl_off>;
+	pinctrl-23 = <&mtkaif_dl_on>;
+	status = "okay";
+};
+
+/* qqcandy LCD backlight bias: 5.10 oplus6895_21143.dts:808-814 */
+&i2c9 {
+	i2c_lcd_bias@3e {
+		compatible = "mediatek,I2C_LCD_BIAS";
+		reg = <0x3e>;
+		status = "okay";
+	};
+};
+
+/*
+ * Bluetooth reads its factory address from the same partition as WiFi. btmtk
+ * registers the HCI device during probe, long before storage is up, so it seeds
+ * a locally-administered address, retries this cell until it can be read, and
+ * re-applies it (plus the vendor set-address command) once the stack is up --
+ * HCI init otherwise overwrites hdev->bdaddr with the controller's built-in one.
+ */
+&bt {
+	nvmem-cells = <&bt_bdaddr>;
+	nvmem-cell-names = "bd-address";
+};
+
+&mt6375_auxadc {
+	isink_load-supply = <&mt6363_isink_load>;
+	status = "okay";
+};
+
+#include "mt6895-oplus-qqcandy-battery.dtsi"

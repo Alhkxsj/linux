@@ -1,0 +1,276 @@
+/*
+ * qqcandy-mblock.dtsi -- reserved-memory regions transplanted from the LIVE
+ * device's LK-generated FDT (/sys/firmware/fdt dump, PGZ110 qqcandy,
+ * ColorOS 16.0.2 boot). 45 mblocks total; mblock-10-pstore (0x48090000/
+ * 0xe0000) is intentionally omitted here because it is already covered by
+ * the ramoops@48090000 node in mt6895-oplus-qqcandy.dts -- same physical
+ * range, verified equal to cmdline ramoops.mem_address/size.
+ *
+ * Regions WITHOUT no-map (aee_lk, gz-log, log_store, apu_mvpu_algo,
+ * framebuffer) are plain carve-outs in MTK's mblock scheme; keep them
+ * reserved-but-mapped exactly as LK declared them.
+ * framebuffer (mblock-13) must stay: vendor DRM consumes the LK fb there.
+ * Source of truth: .qqcandy-ref/stock-fdt.dtb (decompiled stock-fdt.dts).
+ */
+
+		mblock-1-dramc-rk0 {
+			compatible = "mediatek,dramc-rk0";
+			reg = <0x02 0x3fffe000 0x00 0x2000>;
+			no-map;
+		};
+
+		mblock-2-emi_mbist_buf {
+			compatible = "mediatek,emi_mbist_buf";
+			reg = <0x00 0x7ffff000 0x00 0x1000>;
+			no-map;
+		};
+
+		mblock-3-gz {
+			compatible = "mediatek,gz";
+			reg = <0x00 0x7f000000 0x00 0xe00000>;
+			no-map;
+		};
+
+		mblock-4-mkp {
+			compatible = "mediatek,mkp";
+			reg = <0x00 0x7ec00000 0x00 0x400000>;
+			no-map;
+		};
+
+		mblock-5-unmap2 {
+			compatible = "mediatek,unmap2";
+			reg = <0x00 0x7e800000 0x00 0x400000>;
+			no-map;
+		};
+
+		mblock-6-gz-log {
+			compatible = "mediatek,gz-log";
+			reg = <0x00 0x7e600000 0x00 0x41000>;
+		};
+
+		mblock-7-log_store {
+			compatible = "mediatek,log_store";
+			reg = <0x00 0x7ffbf000 0x00 0x40000>;
+		};
+
+		mblock-8-atf-log-reserved {
+			compatible = "mediatek,atf-log-reserved";
+			reg = <0x00 0xbfe00000 0x00 0x200000>;
+			no-map;
+		};
+
+		mblock-9-aee_debug_kinfo {
+			compatible = "mediatek,aee_debug_kinfo";
+			reg = <0x00 0x48080000 0x00 0x10000>;
+			no-map;
+		};
+
+		mblock-11-minirdump {
+			compatible = "mediatek,minirdump";
+			reg = <0x00 0x48170000 0x00 0x10000>;
+			no-map;
+		};
+
+		mblock-12-aee_lk {
+			compatible = "mediatek,aee_lk";
+			reg = <0x00 0x50700000 0x00 0x800000>;
+		};
+
+		mblock-13-framebuffer {
+			compatible = "mediatek,framebuffer";
+			/* no-map added (stock LK leaves it mapped): simplefb must own
+			 * the live LK scanout buffer -- xaga dts rationale */
+			no-map;
+			reg = <0x00 0xfe1af000 0x00 0x1e50000>;
+		};
+
+		mblock-14-me_cmdq_reserved {
+			compatible = "mediatek,me_cmdq_reserved";
+			reg = <0x02 0x3fe00000 0x00 0x100000>;
+			no-map;
+		};
+
+		mblock-15-platform_mtksmmu_protpgd {
+			compatible = "mediatek,platform_mtksmmu_protpgd";
+			reg = <0x00 0x7c400000 0x00 0x2200000>;
+			no-map;
+		};
+
+		mblock-16-BL31-reserved {
+			compatible = "mediatek,BL31-reserved";
+			reg = <0x00 0x48200000 0x00 0x200000>;
+			no-map;
+		};
+
+		mblock-17-SSPM-reserved {
+			compatible = "mediatek,SSPM-reserved";
+			reg = <0x00 0x7fe3f000 0x00 0x180000>;
+			no-map;
+		};
+
+		mblock-18-MCUPM-reserved {
+			compatible = "mediatek,MCUPM-reserved";
+			reg = <0x00 0x7e700000 0x00 0x100000>;
+			no-map;
+		};
+
+		mblock-19-tee-secmem {
+			compatible = "mediatek,tee-secmem";
+			reg = <0x00 0x7bc00000 0x00 0x800000>;
+			no-map;
+		};
+
+		mblock-20-tee-reserved {
+			compatible = "mediatek,tee-reserved";
+			reg = <0x00 0x70000000 0x00 0x5a00000>;
+			no-map;
+		};
+
+		mblock-21-crypto_hw {
+			compatible = "mediatek,crypto_hw";
+			reg = <0x00 0x48401000 0x00 0x1000>;
+			no-map;
+		};
+
+		mblock-22-platform-debug_dfdmcu_dump {
+			compatible = "mediatek,platform-debug_dfdmcu_dump";
+			reg = <0x00 0xfd000000 0x00 0x280000>;
+			no-map;
+		};
+
+		mblock-23-reserve-memory-scp_share {
+			compatible = "mediatek,reserve-memory-scp_share";
+			reg = <0x00 0x8f000000 0x00 0x7a0000>;
+			no-map;
+		};
+
+		mblock-24-SCP-reserved {
+			compatible = "mediatek,SCP-reserved";
+			reg = <0x00 0xbf700000 0x00 0x700000>;
+			no-map;
+		};
+
+		mblock-25-mm_ccu_reserved {
+			compatible = "mediatek,mm_ccu_reserved";
+			reg = <0x00 0x80000000 0x00 0x100000>;
+			no-map;
+		};
+
+		mblock-26-apu_mvpu_algo {
+			compatible = "mediatek,apu_mvpu_algo";
+			reg = <0x00 0xbdc00000 0x00 0x1b00000>;
+		};
+
+		mblock-27-apu_apusys-rv_secure {
+			compatible = "mediatek,apu_apusys-rv_secure";
+			reg = <0x00 0x8f900000 0x00 0x700000>;
+			no-map;
+		};
+
+		mblock-28-apu_apusys-rv_aee-coredump {
+			compatible = "mediatek,apu_apusys-rv_aee-coredump";
+			reg = <0x00 0x8ed90000 0x00 0x270000>;
+			no-map;
+		};
+
+		mblock-29-ccci_tag_mem {
+			compatible = "mediatek,ccci_tag_mem";
+			reg = <0x00 0xbdbf0000 0x00 0x10000>;
+			no-map;
+		};
+
+		mblock-30-md_mem_usage {
+			compatible = "mediatek,md_mem_usage";
+			reg = <0x00 0xd0000000 0x00 0x24b0000>;
+			no-map;
+		};
+
+		mblock-31-md_mem_usage {
+			compatible = "mediatek,md_mem_usage";
+			reg = <0x00 0xd3000000 0x00 0x230000>;
+			no-map;
+		};
+
+		mblock-32-md_mem_usage {
+			compatible = "mediatek,md_mem_usage";
+			reg = <0x00 0xd4000000 0x00 0x8da0000>;
+			no-map;
+		};
+
+		mblock-33-md_mem_usage {
+			compatible = "mediatek,md_mem_usage";
+			reg = <0x00 0xed600000 0x00 0xa00000>;
+			no-map;
+		};
+
+		mblock-34-ap_md_nc_smem {
+			compatible = "mediatek,ap_md_nc_smem";
+			reg = <0x00 0x8e000000 0x00 0x120000>;
+			no-map;
+		};
+
+		mblock-35-ap_md_c_smem {
+			compatible = "mediatek,ap_md_c_smem";
+			reg = <0x00 0x88000000 0x00 0x5060000>;
+			no-map;
+		};
+
+		mblock-36-adsp_image_reserved {
+			compatible = "mediatek,adsp_image_reserved";
+			reg = <0x00 0x7a000000 0x00 0x1330000>;
+			no-map;
+		};
+
+		mblock-37-me_GPUEB_SHARED {
+			compatible = "mediatek,me_GPUEB_SHARED";
+			reg = <0x00 0x7b900000 0x00 0x200000>;
+			no-map;
+		};
+
+		mblock-38-me_GPUmputab_PMA {
+			compatible = "mediatek,me_GPUmputab_PMA";
+			reg = <0x00 0x7b500000 0x00 0x400000>;
+			no-map;
+		};
+
+		mblock-39-me_vcp_reserved {
+			compatible = "mediatek,me_vcp_reserved";
+			reg = <0x00 0xbd300000 0x00 0x800000>;
+			no-map;
+		};
+
+		mblock-40-debug_met_res-ram {
+			compatible = "mediatek,debug_met_res-ram";
+			reg = <0x00 0x9f7ff000 0x00 0x800000>;
+			no-map;
+		};
+
+		mblock-41-adsp_shared_reserved {
+			compatible = "mediatek,adsp_shared_reserved";
+			reg = <0x00 0xf8000000 0x00 0xa50000>;
+			no-map;
+		};
+
+		mblock-42-consys_gps_emi {
+			compatible = "mediatek,consys_gps_emi";
+			reg = <0x00 0x7bb00000 0x00 0x100000>;
+			no-map;
+		};
+
+		mblock-43-sspm_ap-shared {
+			compatible = "mediatek,sspm_ap-shared";
+			reg = <0x00 0x7b3f0000 0x00 0x110000>;
+			no-map;
+		};
+
+		consys_reserved: mblock-44-consys_emi_reserved {
+			compatible = "mediatek,consys_emi_reserved";
+			reg = <0x00 0x8e500000 0x00 0x800000>;
+			no-map;
+		};
+
+		wifi_reserved: mblock-45-shared-dma-pool_wifi-reserve-memory_dma {
+			compatible = "shared-dma-pool";
+			reg = <0x00 0xbb000000 0x00 0x1400000>;
+			no-map;
+		};

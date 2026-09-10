@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0
+config MTK_COMBO
+bool "MediaTek MT6895 connectivity support"
+help
+  Enable the downstream MediaTek connectivity stack for MT6895
+  (CONNAC2X2 SOC7_0) on the xaga mainline port.
+
+config MTK_COMBO_CHIP_CONSYS_6895
+bool "MT6895 Consys support"
+depends on MTK_COMBO
+default y
+
+config MTK_COMBO_WIFI
+bool "MT6895 Wi-Fi support"
+depends on MTK_COMBO
+default y
+
+config MTK_CONNSYS_DEDICATED_LOG_PATH
+bool "MTK dedicated connsys log path"
+depends on MTK_COMBO
+default y
+
+config MTK_BTIF
+	bool "MediaTek BTIF interface support"
+	default y
+
+config MTK_BT_MT66XX
+	bool "MediaTek MT66xx Bluetooth driver"
+	depends on BT
+	select MTK_BTIF
+	default y
+
+config MTK_COMBO_BT
+	bool "MediaTek Combo Bluetooth support in conninfra"
+	depends on MTK_BT_MT66XX
+	default y
