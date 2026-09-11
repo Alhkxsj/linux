@@ -45,10 +45,18 @@ static unsigned int mtk_vcodec_fw_stub_get_venc_capa(struct mtk_vcodec_fw *fw)
 	return 0;
 }
 
+/*
+ * The stateless decoders map one shared block (the "vsi") during per-codec
+ * init and refuse to continue when it is NULL. There is no firmware to place
+ * it, so use a kernel-owned DMA-coherent buffer: the LAT/CORE read the decode
+ * parameters out of it, so it has to be DMA-able.
+ */
+#define MTK_VCODEC_STUB_VSI_SIZE	SZ_128K
+
 static void *mtk_vcodec_fw_stub_map_dm_addr(struct mtk_vcodec_fw *fw,
 					    u32 dtcm_dmem_addr)
 {
-	return NULL;
+	return fw->vsi_buf;
 }
 
 static int mtk_vcodec_fw_stub_ipi_register(struct mtk_vcodec_fw *fw, int id,
@@ -97,6 +105,11 @@ struct mtk_vcodec_fw *mtk_vcodec_fw_stub_init(void *priv,
 	fw->type = STUB;
 	fw->ops = &mtk_vcodec_fw_stub_ops;
 	fw->pdev = plat_dev;
+
+	fw->vsi_buf = dmam_alloc_coherent(&plat_dev->dev, MTK_VCODEC_STUB_VSI_SIZE,
+					  &fw->vsi_dma, GFP_KERNEL);
+	if (!fw->vsi_buf)
+		return ERR_PTR(-ENOMEM);
 
 	dev_info(&plat_dev->dev, "using the no-firmware codec backend\n");
 

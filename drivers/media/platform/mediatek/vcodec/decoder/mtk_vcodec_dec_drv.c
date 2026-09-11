@@ -402,6 +402,14 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "Could not get vdec IPI device");
 		return -ENODEV;
 	}
+	/* Same 34-bit window the display and JPEG drivers use; without it the
+	 * decoder's DMA allocations (and the no-firmware backend's vsi block)
+	 * fail. */
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(34));
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to set DMA mask: %d\n", ret);
+		return ret;
+	}
 	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
 
 	dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, DECODER);

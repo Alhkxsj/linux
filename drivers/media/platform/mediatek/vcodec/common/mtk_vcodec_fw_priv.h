@@ -13,6 +13,10 @@ struct mtk_vcodec_fw {
 	const struct mtk_vcodec_fw_ops *ops;
 	struct platform_device *pdev;
 	struct mtk_scp *scp;
+	/* no-firmware backend: the DMA-coherent block that stands in for the
+	 * firmware-provided "vsi" shared memory */
+	void *vsi_buf;
+	dma_addr_t vsi_dma;
 	enum mtk_vcodec_fw_use fw_use;
 };
 
