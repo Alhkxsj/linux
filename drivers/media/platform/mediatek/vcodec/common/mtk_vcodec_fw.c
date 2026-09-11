@@ -19,6 +19,8 @@ struct mtk_vcodec_fw *mtk_vcodec_fw_select(void *priv, enum mtk_vcodec_fw_type t
 		return mtk_vcodec_fw_vpu_init(priv, fw_use);
 	case SCP:
 		return mtk_vcodec_fw_scp_init(priv, fw_use);
+	case STUB:
+		return mtk_vcodec_fw_stub_init(priv, fw_use);
 	default:
 		dev_err(&plat_dev->dev, "Invalid vcodec fw type");
 		return ERR_PTR(-EINVAL);

@@ -349,8 +349,23 @@ static void mtk_vcodec_dec_get_chip_name(struct mtk_vcodec_dec_dev *vdec_dev)
 		vdec_dev->chip_name = MTK_VDEC_INVAL;
 }
 
+/*
+ * WORKAROUND(bring-up): hold the decoder off until someone asks for it, so the
+ * stateless decoder bring-up cannot disturb the boot. Enable at runtime with
+ *
+ *   echo 1 > /sys/module/mtk_vcodec_dec/parameters/vdec_enable
+ *   echo 16000000.video-codec > /sys/bus/platform/drivers/mtk-vcodec-dec/bind
+ */
+static bool vdec_enable;
+module_param(vdec_enable, bool, 0644);
+
 static int mtk_vcodec_probe(struct platform_device *pdev)
 {
+	if (!vdec_enable) {
+		dev_info(&pdev->dev, "vdec probe gated off (vdec_enable=0)\n");
+		return -ENODEV;
+	}
+
 	struct mtk_vcodec_dec_dev *dev;
 	struct video_device *vfd_dec;
 	phandle rproc_phandle;
@@ -377,6 +392,10 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 	} else if (!of_property_read_u32(pdev->dev.of_node, "mediatek,scp",
 					 &rproc_phandle)) {
 		fw_type = SCP;
+	} else if (of_device_is_compatible(pdev->dev.of_node,
+					  "mediatek,mt6895-vcodec-dec")) {
+		/* stateless, kernel-driven: no vendor firmware involved */
+		fw_type = STUB;
 	} else {
 		dev_dbg(&pdev->dev, "Could not get vdec IPI device");
 		return -ENODEV;
@@ -549,6 +568,10 @@ static const struct of_device_id mtk_vcodec_match[] = {
 	{
 		.compatible = "mediatek,mt8186-vcodec-dec",
 		.data = &mtk_vdec_single_core_pdata,
+	},
+	{
+		.compatible = "mediatek,mt6895-vcodec-dec",
+		.data = &mtk_lat_sig_core_pdata,
 	},
 	{
 		.compatible = "mediatek,mt8195-vcodec-dec",

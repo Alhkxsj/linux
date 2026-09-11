@@ -14,6 +14,7 @@ struct mtk_vcodec_enc_dev;
 enum mtk_vcodec_fw_type {
 	VPU,
 	SCP,
+	STUB,		/* hardware driven from the kernel, no firmware at all */
 };
 
 enum mtk_vcodec_fw_use {
@@ -26,6 +27,8 @@ struct mtk_vcodec_fw;
 typedef void (*mtk_vcodec_ipi_handler) (void *data,
 	unsigned int len, void *priv);
 
+struct mtk_vcodec_fw *mtk_vcodec_fw_stub_init(void *priv,
+					      enum mtk_vcodec_fw_use fw_use);
 struct mtk_vcodec_fw *mtk_vcodec_fw_select(void *priv, enum mtk_vcodec_fw_type type,
 					   enum mtk_vcodec_fw_use fw_use);
 void mtk_vcodec_fw_release(struct mtk_vcodec_fw *fw);

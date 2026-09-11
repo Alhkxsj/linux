@@ -3711,6 +3711,53 @@ block_size = <0x1000>;
 			hw-voter-regmap = <&hwv>;
 		};
 
+		/* Video decoder, mainline stateless shape: a parent window plus
+		 * lat-soc / lat / core children. Addresses, IRQs, power domains,
+		 * iommu ports and clock gates are the device's own values; with
+		 * ranges = <0 0 0x16000000 0x30000> the children's offsets land
+		 * exactly on its VDEC_SOC_GCON / VDEC_LAT_MISC / VDEC_VLD regions.
+		 * Driven from the kernel: no vendor firmware (see mtk_vcodec_fw_stub.c). */
+		vdec: video-codec@16000000 {
+			compatible = "mediatek,mt6895-vcodec-dec";
+			reg = <0x16000000 0x1000>, <0x1602f000 0x1000>;
+			ranges = <0 0 0x16000000 0x30000>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			iommus = <&mdp_iommu 0x80>;
+
+			video-codec@f000 {
+				compatible = "mediatek,mtk-vcodec-lat-soc";
+				reg = <0 0xf000 0 0x800>;
+				iommus = <&mdp_iommu 0x80>, <&mdp_iommu 0x81>,
+					 <&mdp_iommu 0x82>, <&mdp_iommu 0x83>,
+					 <&mdp_iommu 0x84>, <&mdp_iommu 0x85>;
+				clocks = <&vdec_soc_gcon_base_clk CLK_VDE1_VDEC_CKEN>,
+					 <&vdec_soc_gcon_base_clk CLK_VDE1_LAT_CKEN>;
+				clock-names = "vdec", "lat";
+				power-domains = <&spm 21>;
+			};
+
+			video-codec@10000 {
+				compatible = "mediatek,mtk-vcodec-lat";
+				reg = <0 0x10000 0 0x800>;
+				interrupts = <GIC_SPI 605 IRQ_TYPE_LEVEL_HIGH 0>;
+				iommus = <&mdp_iommu 0x10088>;
+				clocks = <&vdec_soc_gcon_base_clk CLK_VDE1_LAT_CKEN>;
+				clock-names = "lat";
+				power-domains = <&spm 21>;
+			};
+
+			video-codec@20000 {
+				compatible = "mediatek,mtk-vcodec-core";
+				reg = <0 0x20000 0 0x800>;
+				interrupts = <GIC_SPI 608 IRQ_TYPE_LEVEL_HIGH 0>;
+				iommus = <&mdp_iommu 0x89>, <&mdp_iommu 0x8a>;
+				clocks = <&vdec_gcon_base_clk CLK_VDE2_VDEC_CKEN>;
+				clock-names = "vdec";
+				power-domains = <&spm 22>;
+			};
+		};
+
 		venc_gcon_clk: syscon@17000000 {
 			compatible = "mediatek,mt6895-vencsys", "syscon";
 			reg = <0x17000000 0x1000>;

@@ -5,6 +5,7 @@ obj-$(CONFIG_VIDEO_MEDIATEK_VCODEC) += mtk-vcodec-common.o
 mtk-vcodec-common-y := mtk_vcodec_intr.o \
 		mtk_vcodec_util.o \
 		mtk_vcodec_fw.o \
+		mtk_vcodec_fw_stub.o \
 
 ifneq ($(CONFIG_VIDEO_MEDIATEK_VCODEC_VPU),)
 mtk-vcodec-common-y += mtk_vcodec_fw_vpu.o
