@@ -4094,7 +4094,7 @@ static const struct proc_ops hrt_lp_proc_fops = {
 
 void disp_dbg_probe(void)
 {
-	pr_err("XAGA-V113 disp_dbg_probe: kick_mutex cmd available\n");
+	DDPDBG("XAGA-V113 disp_dbg_probe: kick_mutex cmd available\n");
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 	struct dentry *d_folder;
 	struct dentry *d_file;

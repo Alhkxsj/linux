@@ -3664,9 +3664,9 @@ static void xaga_first_enable_workfn(struct work_struct *work)
 	if (!drm)
 		goto out;
 
-	pr_err("XAGA-FE[00] workfn entered, taking the pipe over now\n");
+	DDPDBG("XAGA-FE[00] workfn entered, taking the pipe over now\n");
 	mtk_drm_first_enable(drm);
-	pr_err("XAGA-FE[99] first_enable returned - takeover survived\n");
+	DDPDBG("XAGA-FE[99] first_enable returned - takeover survived\n");
 
 out:
 	complete(&xaga_first_enable_done);
@@ -4675,7 +4675,7 @@ void xaga_dump_dsi(void)
 
 	if (!dsi)
 		return;
-	pr_err("XAGA-DSI DSI START=0x%08x INTSTA=0x%08x CON=0x%08x MODE=0x%08x TXRX=0x%08x PSCTRL=0x%08x SIZE_CON=0x%08x VM_CMD=0x%08x\n",
+	DDPDBG("XAGA-DSI DSI START=0x%08x INTSTA=0x%08x CON=0x%08x MODE=0x%08x TXRX=0x%08x PSCTRL=0x%08x SIZE_CON=0x%08x VM_CMD=0x%08x\n",
 	       readl(dsi + 0x00), readl(dsi + 0x0c), readl(dsi + 0x10),
 	       readl(dsi + 0x14), readl(dsi + 0x18), readl(dsi + 0x1c),
 	       readl(dsi + 0x38), readl(dsi + 0x200));
@@ -4847,12 +4847,12 @@ static int mtk_drm_kms_init(struct drm_device *drm)
 	DDPINFO("%s-\n", __func__);
 	mtk_drm_init_dummy_table(private);
 
-	pr_err("XAGA-STAGE kms_init: BEFORE first_enable (LK handoff state)\n");
+	DDPDBG("XAGA-STAGE kms_init: BEFORE first_enable (LK handoff state)\n");
 	{
 		void __iomem *dsc = ioremap(0x14015000, 0x1000);
 		void __iomem *dsi = ioremap(0x14017000, 0x1000);
 
-		pr_err("XAGA-DSC[handoff] CON=0x%08x INTSTA=0x%08x DSI_INTSTA=0x%08x\n",
+		DDPDBG("XAGA-DSC[handoff] CON=0x%08x INTSTA=0x%08x DSI_INTSTA=0x%08x\n",
 		       readl(dsc + 0x00), readl(dsc + 0x08),
 		       readl(dsi + 0x0c));
 		iounmap(dsc);
@@ -4869,10 +4869,10 @@ static int mtk_drm_kms_init(struct drm_device *drm)
 	queue_work(system_unbound_wq, &xaga_first_enable_work);
 	if (!wait_for_completion_timeout(&xaga_first_enable_done,
 					 XAGA_FIRST_ENABLE_TIMEOUT_S * HZ))
-		pr_err("XAGA-FE[!!] takeover still running after %d s, continuing without it\n",
+		DDPDBG("XAGA-FE[!!] takeover still running after %d s, continuing without it\n",
 		       XAGA_FIRST_ENABLE_TIMEOUT_S);
 
-	pr_err("XAGA-STAGE kms_init done (first_enable joined)\n");
+	DDPDBG("XAGA-STAGE kms_init done (first_enable joined)\n");
 
 	/*
 	 * When kernel init, SMI larb will get once for keeping
@@ -5991,7 +5991,7 @@ SKIP_SIDE_DISP:
 #undef MDP_RDMA_EN_OFFSET
 }
 
-	pr_err("XAGA-STAGE probe: comps collected, master_add next\n");
+	DDPDBG("XAGA-STAGE probe: comps collected, master_add next\n");
 
 	ret = component_master_add_with_match(dev, &mtk_drm_ops, match);
 	DDPINFO("%s- ret:%d\n", __func__, ret);
@@ -6222,23 +6222,23 @@ static int __init mtk_drm_init(void)
 #endif
 
 	DDPINFO("%s+\n", __func__);
-	pr_info("XAGA-DRM: mtk_drm_init enter\n");
+	DDPDBG("XAGA-DRM: mtk_drm_init enter\n");
 	for (i = 0; i < ARRAY_SIZE(mtk_drm_drivers); i++) {
 		DDPINFO("%s register %s driver\n",
 			__func__, mtk_drm_drivers[i]->driver.name);
-		pr_info("XAGA-DRM: registering %s\n",
+		DDPDBG("XAGA-DRM: registering %s\n",
 			mtk_drm_drivers[i]->driver.name);
 		ret = platform_driver_register(mtk_drm_drivers[i]);
 		if (ret < 0) {
 			DDPPR_ERR("Failed to register %s driver: %d\n",
 				  mtk_drm_drivers[i]->driver.name, ret);
-			pr_err("XAGA-DRM: failed to register %s: %d\n",
+			DDPDBG("XAGA-DRM: failed to register %s: %d\n",
 			       mtk_drm_drivers[i]->driver.name, ret);
 			goto err;
 		}
 	}
 	DDPINFO("%s-\n", __func__);
-	pr_info("XAGA-DRM: mtk_drm_init done\n");
+	DDPDBG("XAGA-DRM: mtk_drm_init done\n");
 
 	return 0;
 

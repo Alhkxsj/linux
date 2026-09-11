@@ -1345,7 +1345,7 @@ void mtk_crtc_prepare_dual_pipe(struct mtk_drm_crtc *mtk_crtc)
 		DDPDBG("j:%d,com_nr:%d,path_len:%d\n",
 			j, mtk_crtc->dual_pipe_ddp_ctx.ddp_comp_nr[j],
 			mtk_crtc->path_data->dual_path_len[j]);
-		pr_err("XAGA-DUAL[alloc] j=%d comp_nr=%d path_len=%d ptr=%p\n",
+		DDPDBG("XAGA-DUAL[alloc] j=%d comp_nr=%d path_len=%d ptr=%p\n",
 		       j, mtk_crtc->dual_pipe_ddp_ctx.ddp_comp_nr[j],
 		       mtk_crtc->path_data->dual_path_len[j],
 		       mtk_crtc->dual_pipe_ddp_ctx.ddp_comp[j]);
@@ -4131,7 +4131,7 @@ int mtk_crtc_fill_fb_para(struct mtk_drm_crtc *mtk_crtc)
 	if (_parse_tag_videolfb(&vramsize, &fb_base, &fps) < 0) {
 		DDPPR_ERR("Can't access buffer info from dts\n");
 	} else {
-		pr_err("XAGA-FBIOMMU: parse OK fb_base=%pa vram=0x%x fps=%d\n",
+		DDPDBG("XAGA-FBIOMMU: parse OK fb_base=%pa vram=0x%x fps=%d\n",
 			&fb_base, vramsize, fps);
 		fb_info->fb_pa = fb_base;
 		fb_info->width = ALIGN_TO_32(mtk_crtc->base.mode.hdisplay);
@@ -4593,7 +4593,7 @@ static void mtk_crtc_ddp_config(struct drm_crtc *crtc)
 
 			if (ddpcfg_dbg < 8) {
 				ddpcfg_dbg++;
-				pr_err("XAGA-DDPCFG[hit] i=%d comp=%d w=%u dst_x=%u en=%d\n",
+				DDPDBG("XAGA-DDPCFG[hit] i=%d comp=%d w=%u dst_x=%u en=%d\n",
 				       i, comp->id, plane_state->pending.width,
 				       plane_state->pending.dst_x,
 				       plane_state->pending.enable);
@@ -4721,7 +4721,7 @@ void mtk_crtc_start_sodi_loop(struct drm_crtc *crtc)
 	struct mtk_drm_crtc *mtk_crtc = to_mtk_crtc(crtc);
 	struct mtk_drm_private *priv = NULL;
 	unsigned long crtc_id = (unsigned long)drm_crtc_index(crtc);
-	pr_err("XAGA-TRIGLOOP start enter crtc=%ld\n", crtc_id);
+	DDPDBG("XAGA-TRIGLOOP start enter crtc=%ld\n", crtc_id);
 
 	if (crtc_id) {
 		DDPDBG("%s:%d invalid crtc:%ld\n",
@@ -4744,7 +4744,7 @@ void mtk_crtc_start_sodi_loop(struct drm_crtc *crtc)
 		mtk_crtc->gce_obj.event[EVENT_SYNC_TOKEN_SODI]);
 
 	cmdq_pkt_finalize_loop(cmdq_handle);
-	pr_err("XAGA-TRIGLOOP finalize ok crtc=%ld\n", crtc_id);
+	DDPDBG("XAGA-TRIGLOOP finalize ok crtc=%ld\n", crtc_id);
 	cmdq_pkt_flush_async(cmdq_handle, NULL, (void *)crtc_id);
 }
 
@@ -5077,7 +5077,7 @@ void mtk_crtc_start_trig_loop(struct drm_crtc *crtc)
 	}
 	cmdq_pkt_finalize_loop(cmdq_handle);
 	ret = cmdq_pkt_flush_async(cmdq_handle, trig_done_cb, (void *)crtc_id);
-	pr_err("XAGA-TRIGLOOP flush_async ret=%d crtc=%ld\n", ret, crtc_id);
+	DDPDBG("XAGA-TRIGLOOP flush_async ret=%d crtc=%ld\n", ret, crtc_id);
 
 	mtk_crtc_clear_wait_event(crtc);
 #endif
@@ -5883,7 +5883,7 @@ void mtk_crtc_config_default_path(struct mtk_drm_crtc *mtk_crtc)
 	cfg.bpc = mtk_crtc->bpc;
 	cfg.p_golden_setting_context = __get_golden_setting_context(mtk_crtc);
 
-	pr_err("XAGA-STAGE config_default_path: mode %dx%d vrefresh=%d bpc=%d is_dual_pipe=%d\n",
+	DDPDBG("XAGA-STAGE config_default_path: mode %dx%d vrefresh=%d bpc=%d is_dual_pipe=%d\n",
 	       cfg.w, cfg.h, cfg.vrefresh, cfg.bpc,
 	       mtk_crtc->is_dual_pipe ? 1 : 0);
 	xaga_dump_disp("before_path_config");
@@ -5950,7 +5950,7 @@ void mtk_crtc_config_default_path(struct mtk_drm_crtc *mtk_crtc)
 	cmdq_pkt_flush(cmdq_handle);
 	cmdq_pkt_destroy(cmdq_handle);
 
-	pr_err("XAGA-STAGE config_default_path DONE (cmdq flushed)\n");
+	DDPDBG("XAGA-STAGE config_default_path DONE (cmdq flushed)\n");
 	xaga_dump_disp("after_path_config");
 }
 
@@ -6198,7 +6198,7 @@ void mtk_drm_crtc_enable(struct drm_crtc *crtc)
 	/*for dual pipe*/
 	mtk_crtc_prepare_dual_pipe(mtk_crtc);
 
-	pr_err("XAGA-STAGE crtc_enable: is_dual_pipe=%d ddp_mode=%d path_comp_nr=%d crtc_id=%d\n",
+	DDPDBG("XAGA-STAGE crtc_enable: is_dual_pipe=%d ddp_mode=%d path_comp_nr=%d crtc_id=%d\n",
 	       mtk_crtc->is_dual_pipe ? 1 : 0, mtk_crtc->ddp_mode,
 	       mtk_crtc->ddp_ctx[mtk_crtc->ddp_mode].ddp_comp_nr[DDP_MAJOR],
 	       crtc_id);
@@ -6300,7 +6300,7 @@ void mtk_drm_crtc_enable(struct drm_crtc *crtc)
 	if (mtk_crtc->mml_cfg)
 		mtk_crtc_alloc_sram(mtk_crtc);
 
-	pr_err("XAGA-STAGE crtc_enable DONE (all 15 steps)\n");
+	DDPDBG("XAGA-STAGE crtc_enable DONE (all 15 steps)\n");
 	xaga_dump_disp("crtc_enable_done");
 end:
 	CRTC_MMP_EVENT_END(crtc_id, enable,
@@ -6379,7 +6379,7 @@ void mtk_drm_crtc_atomic_resume(struct drm_crtc *crtc,
 	CRTC_MMP_EVENT_START(index, resume,
 			mtk_crtc->enabled, index);
 
-	pr_err("XAGA-CRTC[atomic_enable] idx=%d enabled=%d\n",
+	DDPDBG("XAGA-CRTC[atomic_enable] idx=%d enabled=%d\n",
 	       index, mtk_crtc->enabled);
 
 	/* hold wakelock */
@@ -6744,7 +6744,7 @@ void mtk_crtc_first_enable_ddp_config(struct mtk_drm_crtc *mtk_crtc)
 	cmdq_pkt_flush(cmdq_handle);
 	cmdq_pkt_destroy(cmdq_handle);
 
-	pr_err("XAGA-STAGE first_enable_ddp_config DONE (first_cfg flushed)\n");
+	DDPDBG("XAGA-STAGE first_enable_ddp_config DONE (first_cfg flushed)\n");
 	xaga_dump_disp("after_first_config");
 
 	if (mtk_crtc_is_frame_trigger_mode(&mtk_crtc->base))
@@ -6775,64 +6775,64 @@ void mtk_drm_crtc_first_enable(struct drm_crtc *crtc)
 	 */
 	xaga_dump_disp("lk_pristine");
 
-	pr_err("XAGA-FE[01] init_para enter\n");
+	DDPDBG("XAGA-FE[01] init_para enter\n");
 	mtk_drm_crtc_init_para(crtc);
-	pr_err("XAGA-FE[02] init_para done\n");
+	DDPDBG("XAGA-FE[02] init_para done\n");
 
 	/*0.Attempt to get white point information once*/
 	output_comp = mtk_ddp_comp_request_output(mtk_crtc);
 	if (output_comp)
 		mtk_ddp_comp_io_cmd(output_comp, NULL, MI_GET_WP_INFO,
 				&en);
-	pr_err("XAGA-FE[03] MI_GET_WP_INFO done (output_comp=%d)\n",
+	DDPDBG("XAGA-FE[03] MI_GET_WP_INFO done (output_comp=%d)\n",
 	       output_comp ? output_comp->id : -1);
 
 	if (mtk_crtc->enabled) {
 		DDPINFO("crtc%d skip %s\n", crtc_id, __func__);
-		pr_err("XAGA-FE[--] crtc%d already enabled, skipping\n", crtc_id);
+		DDPDBG("XAGA-FE[--] crtc%d already enabled, skipping\n", crtc_id);
 		return;
 	}
 	DDPINFO("crtc%d do %s\n", crtc_id, __func__);
 
 	/* 1. hold wakelock */
 	mtk_drm_crtc_wk_lock(crtc, 1, __func__, __LINE__);
-	pr_err("XAGA-FE[04] wk_lock held\n");
+	DDPDBG("XAGA-FE[04] wk_lock held\n");
 
 	/*for dual pipe*/
 	mtk_crtc_prepare_dual_pipe(mtk_crtc);
-	pr_err("XAGA-FE[05] prepare_dual_pipe done (is_dual=%d)\n",
+	DDPDBG("XAGA-FE[05] prepare_dual_pipe done (is_dual=%d)\n",
 	       mtk_crtc->is_dual_pipe);
 
 	/* 2. start trigger loop first to keep gce alive */
 	if (mtk_crtc_with_trigger_loop(crtc)) {
-		pr_err("XAGA-FE[06] with_trigger_loop=1 sodi_loop=%d frame_trig=%d\n",
+		DDPDBG("XAGA-FE[06] with_trigger_loop=1 sodi_loop=%d frame_trig=%d\n",
 		       mtk_crtc_with_sodi_loop(crtc),
 		       mtk_crtc_is_frame_trigger_mode(crtc));
 		if (mtk_crtc_with_sodi_loop(crtc) &&
 			(!mtk_crtc_is_frame_trigger_mode(crtc))) {
 			mtk_crtc_start_sodi_loop(crtc);
-			pr_err("XAGA-FE[07] start_sodi_loop done\n");
+			DDPDBG("XAGA-FE[07] start_sodi_loop done\n");
 		}
 		mtk_crtc_start_trig_loop(crtc);
-		pr_err("XAGA-FE[08] start_trig_loop done\n");
+		DDPDBG("XAGA-FE[08] start_trig_loop done\n");
 	} else {
-		pr_err("XAGA-FE[06] with_trigger_loop=0, skipped\n");
+		DDPDBG("XAGA-FE[06] with_trigger_loop=0, skipped\n");
 	}
 
 	/* 3. Regsister configuration */
-	pr_err("XAGA-FE[09] first_enable_ddp_config enter\n");
+	DDPDBG("XAGA-FE[09] first_enable_ddp_config enter\n");
 	mtk_crtc_first_enable_ddp_config(mtk_crtc);
 
-	pr_err("XAGA-FE[10] after first_enable_ddp_config\n");
+	DDPDBG("XAGA-FE[10] after first_enable_ddp_config\n");
 
 	if (disp_helper_get_stage() == DISP_HELPER_STAGE_NORMAL) {
 		/* 4. power on mtcmos */
 		mtk_drm_top_clk_prepare_enable(crtc->dev);
-		pr_err("XAGA-FE[11] top_clk_prepare_enable done\n");
+		DDPDBG("XAGA-FE[11] top_clk_prepare_enable done\n");
 
 		/* 5. prepare modules would be used in this CRTC */
 		mtk_crtc_ddp_prepare(mtk_crtc);
-		pr_err("XAGA-FE[12] ddp_prepare done\n");
+		DDPDBG("XAGA-FE[12] ddp_prepare done\n");
 
 		/*
 		 * Step 5 of mtk_drm_crtc_enable(), which the vendor
@@ -6865,7 +6865,7 @@ void mtk_drm_crtc_first_enable(struct drm_crtc *crtc)
 		 * scenario is in use this early.
 		 */
 		mtk_crtc_connect_default_path(mtk_crtc);
-		pr_err("XAGA-FE[12a] connect_default_path done\n");
+		DDPDBG("XAGA-FE[12a] connect_default_path done\n");
 
 		/* 6. sodi config */
 		if (priv->data->sodi_config) {
@@ -6876,21 +6876,21 @@ void mtk_drm_crtc_first_enable(struct drm_crtc *crtc)
 			for_each_comp_in_cur_crtc_path(comp, mtk_crtc, i, j)
 				priv->data->sodi_config(crtc->dev, comp->id, NULL, &en);
 		}
-		pr_err("XAGA-FE[13] sodi_config done\n");
+		DDPDBG("XAGA-FE[13] sodi_config done\n");
 	} else {
-		pr_err("XAGA-FE[11] stage != NORMAL, skipped 4-6\n");
+		DDPDBG("XAGA-FE[11] stage != NORMAL, skipped 4-6\n");
 	}
 
 	mtk_gce_backup_slot_restore(mtk_crtc);
-	pr_err("XAGA-FE[14] gce_backup_slot_restore done\n");
+	DDPDBG("XAGA-FE[14] gce_backup_slot_restore done\n");
 
 	/* 7. set vblank*/
 	drm_crtc_vblank_on(crtc);
-	pr_err("XAGA-FE[15] vblank_on done\n");
+	DDPDBG("XAGA-FE[15] vblank_on done\n");
 
 	/* 8. set CRTC SW status */
 	mtk_crtc_set_status(crtc, true);
-	pr_err("XAGA-FE[16] set_status done\n");
+	DDPDBG("XAGA-FE[16] set_status done\n");
 
 	/* 9. power off mtcmos*/
 	/* Because of align lk hw power status,
@@ -6900,7 +6900,7 @@ void mtk_drm_crtc_first_enable(struct drm_crtc *crtc)
 	 */
 	if (disp_helper_get_stage() == DISP_HELPER_STAGE_NORMAL)
 		mtk_drm_top_clk_disable_unprepare(crtc->dev);
-	pr_err("XAGA-FE[17] crtc_first_enable complete\n");
+	DDPDBG("XAGA-FE[17] crtc_first_enable complete\n");
 }
 
 void mtk_drm_crtc_disable(struct drm_crtc *crtc, bool need_wait)
