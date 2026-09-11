@@ -5499,7 +5499,7 @@ void mtk_crtc_dual_layer_config(struct mtk_drm_crtc *mtk_crtc,
 		plane_state_r.comp_state.comp_id = 0;
 
 	p_comp = priv->ddp_comp[dual_pipe_comp_mapping(priv->data->mmsys_id, comp->id)];
-	pr_err("XAGA-DUAL[cfg] idx=%d src=%d -> R:comp=%d Rw=%u Rx=%u | L:comp=%d Lw=%u Lx=%u\n",
+	DDPDBG("XAGA-DUAL[cfg] idx=%d src=%d -> R:comp=%d Rw=%u Rx=%u | L:comp=%d Lw=%u Lx=%u\n",
 	       idx, comp->id, p_comp ? (int)p_comp->id : -1,
 	       plane_state_r.pending.width, plane_state_r.pending.dst_x,
 	       comp->id,
@@ -8180,7 +8180,7 @@ void mtk_drm_crtc_plane_update(struct drm_crtc *crtc, struct drm_plane *plane,
 	struct cmdq_pkt *cmdq_handle = state->cmdq_handle;
 	int need_skip = state->prop_val[CRTC_PROP_SKIP_CONFIG];
 
-	pr_err("XAGA plane_update: plane=%d en=%d skip=%d comp_id=%d lye=%d ext_lye=%d addr=0x%llx %ux%u fmt=0x%x compress=%d\n",
+	DDPDBG("XAGA plane_update: plane=%d en=%d skip=%d comp_id=%d lye=%d ext_lye=%d addr=0x%llx %ux%u fmt=0x%x compress=%d\n",
 		plane_index, plane_state->pending.enable, need_skip,
 		plane_state->comp_state.comp_id, plane_state->comp_state.lye_id,
 		plane_state->comp_state.ext_lye_id,
@@ -8666,7 +8666,7 @@ int mtk_crtc_gce_flush(struct drm_crtc *crtc, void *gce_cb,
 			priv_rb->ddp_comp[DDP_COMPONENT_OVL1_2L];
 
 		if (ovl_rb && ovl_rb->regs)
-			pr_err("XAGA flush_readback: OVL1_2L ADDR=0x%08x MSB=0x%08x HDR=0x%08x ELADDR=0x%08x ELHDR=0x%08x SRC=0x%08x EN=0x%08x\n",
+			DDPDBG("XAGA flush_readback: OVL1_2L ADDR=0x%08x MSB=0x%08x HDR=0x%08x ELADDR=0x%08x ELHDR=0x%08x SRC=0x%08x EN=0x%08x\n",
 				readl(ovl_rb->regs + 0x0f40),   /* layer0 addr */
 				readl(ovl_rb->regs + 0x0f4c),   /* layer0 addr MSB (34-bit) */
 				readl(ovl_rb->regs + 0x0f44),   /* LX_HDR_ADDR(0) */

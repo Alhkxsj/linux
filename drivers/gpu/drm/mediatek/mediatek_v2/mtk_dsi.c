@@ -2242,7 +2242,7 @@ static irqreturn_t mtk_dsi_irq_status(int irq, void *dev_id)
 		if (__ratelimit(&rstw_rs)) {
 			u32 con = readl(dsi->regs + DSI_CON_CTRL);
 
-			pr_err("XAGA-RSTS: CON_CTRL=0x%08x RESET=%d EN=%d INTSTA=0x%08x START=0x%08x MODE=0x%08x VACT=0x%08x\n",
+			DDPDBG("XAGA-RSTS: CON_CTRL=0x%08x RESET=%d EN=%d INTSTA=0x%08x START=0x%08x MODE=0x%08x VACT=0x%08x\n",
 			       con, !!(con & DSI_RESET), !!(con & DSI_EN),
 			       status, readl(dsi->regs + DSI_START),
 			       readl(dsi->regs + DSI_MODE_CTRL),

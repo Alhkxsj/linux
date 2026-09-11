@@ -1873,3 +1873,75 @@ bias-disable;
 };
 
 #include "mt6895-oplus-qqcandy-battery.dtsi"
+
+
+/* ------------------------------------------------------------------
+ * Flashlight: aw36515 dual-LED flash/torch at i2c6 0x63.
+ * Node shape and pin (GPIO122, pinctrl pinmux 0x7a00 with slew-rate and
+ * output-high/low) come from the device's own firmware DT; the IC shares
+ * i2c6 with the TFA9874 amps. The flashlight-core platform node only
+ * provides the class/char device - the IC registers itself with it.
+ * ------------------------------------------------------------------ */
+&soc {
+	flashlight_core: flashlight-core {
+		compatible = "mediatek,flashlight_core";
+	};
+};
+
+&pio {
+	flash_default: flash-default {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO122__FUNC_GPIO122>;
+			slew-rate = <1>;
+		};
+	};
+
+	flash_hwen_high: flash-hwen-high {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO122__FUNC_GPIO122>;
+			slew-rate = <1>;
+			output-high;
+		};
+	};
+
+	flash_hwen_low: flash-hwen-low {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO122__FUNC_GPIO122>;
+			slew-rate = <1>;
+			output-low;
+		};
+	};
+};
+
+&i2c6 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	aw36515: aw36515@63 {
+		compatible = "mediatek,aw36515";
+		reg = <0x63>;
+		/* the driver walks the flash@N children and reads their reg */
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#cooling-cells = <2>;
+		pinctrl-names = "default", "hwen_high", "hwen_low";
+		pinctrl-0 = <&flash_default>;
+		pinctrl-1 = <&flash_hwen_high>;
+		pinctrl-2 = <&flash_hwen_low>;
+		status = "okay";
+
+		flash@0 {
+			reg = <0>;
+			type = <0>;
+			ct = <0>;
+			part = <0>;
+		};
+
+		flash@1 {
+			reg = <1>;
+			type = <0>;
+			ct = <1>;
+			part = <0>;
+		};
+	};
+};

@@ -1342,6 +1342,10 @@
 				compatible = "novatek,NVT-ts-spi";
 				reg = <0>;
 				status = "okay";
+				/* Let the controller wake the system: the driver turns this
+				 * into device_init_wakeup(), and its IRQ stays armed across
+				 * suspend while the wakeup path is enabled. */
+				wakeup-source;
 
 				spi-max-frequency = <13000000>;
 

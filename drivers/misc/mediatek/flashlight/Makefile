@@ -1,2 +1,7 @@
 obj-$(CONFIG_MTK_FLASHLIGHT_CORE) += flashlight-core.o flashlight-device.o
-obj-$(CONFIG_MTK_FLASHLIGHT_AW36515_23081) += v4l2/aw36515_23081.o
+
+# The flash IC drivers live in v4l2/ and include "flashlight-core.h" from
+# this directory, so descend into the subdir and put this directory on
+# their include path (v4l2/Makefile carries the per-IC obj- lines).
+obj-y += v4l2/
+subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/flashlight
