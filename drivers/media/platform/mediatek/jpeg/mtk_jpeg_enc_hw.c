@@ -307,7 +307,9 @@ static irqreturn_t mtk_jpegenc_hw_irq_handler(int irq, void *priv)
 	buf_state = VB2_BUF_STATE_DONE;
 	v4l2_m2m_buf_done(src_buf, buf_state);
 	mtk_jpegenc_put_buf(jpeg);
-	pm_runtime_put(ctx->jpeg->dev);
+	/* Paired with the worker's pm_runtime_get_sync() on this core's device;
+	 * putting the M2M parent underflowed its usage count instead. */
+	pm_runtime_put(jpeg->dev);
 	clk_disable_unprepare(jpeg->venc_clk.clks->clk);
 
 	jpeg->hw_state = MTK_JPEG_HW_IDLE;

@@ -1854,9 +1854,6 @@ retry_select:
 		goto clk_end;
 	}
 
-	v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
-	v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
-
 	mtk_jpeg_set_dec_src(ctx, &src_buf->vb2_buf, &bs);
 	if (mtk_jpeg_set_dec_dst(ctx,
 				 &jpeg_src_buf->dec_param,
@@ -1865,6 +1862,15 @@ retry_select:
 			__func__, __LINE__);
 		goto setdst_end;
 	}
+
+	/* Hand the buffers to the hardware only once the job really goes ahead.
+	 * Upstream removed them before this check and then removed a second
+	 * pair at dec_end, so an error here left a buffer that was pulled out
+	 * of the m2m queues and never completed: vb2 reports that as "leaving
+	 * buffer N in active state" at streamoff, and the queue free path then
+	 * frees a buffer it no longer owns. */
+	v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
+	v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
 
 	schedule_delayed_work(&comp_jpeg[hw_id]->job_timeout_work,
 			      msecs_to_jiffies(MTK_JPEG_HW_TIMEOUT_MSEC));
@@ -1889,6 +1895,8 @@ setdst_end:
 clk_end:
 	pm_runtime_put(comp_jpeg[hw_id]->dev);
 dec_end:
+	/* The buffers were still only peeked on every path that reaches here,
+	 * so this is the one place that removes and completes them. */
 	v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
 	v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
 	v4l2_m2m_buf_done(src_buf, buf_state);
