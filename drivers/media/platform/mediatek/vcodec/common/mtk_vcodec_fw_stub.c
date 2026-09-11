@@ -9,9 +9,9 @@
  * either unused (LAT/VPU IPI) or kernel-side.
  */
 
+#include "../decoder/mtk_vcodec_dec_drv.h"
+#include "../encoder/mtk_vcodec_enc_drv.h"
 #include "mtk_vcodec_fw_priv.h"
-#include "mtk_vcodec_util.h"
-#include "mtk_vcodec_dec_drv.h"
 
 /*
  * Capability bits the decoder reads: no MTK_VCODEC_INNER_RACING (that needs

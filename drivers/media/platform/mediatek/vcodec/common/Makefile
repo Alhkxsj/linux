@@ -11,7 +11,9 @@ ifneq ($(CONFIG_VIDEO_MEDIATEK_VCODEC_VPU),)
 mtk-vcodec-common-y += mtk_vcodec_fw_vpu.o
 endif
 
-ifneq ($(CONFIG_VIDEO_MEDIATEK_VCODEC_SCP),)
+# The SCP backend needs the mainline SCP driver built in (its scp_* symbols
+# are not available to a built-in object when MTK_SCP=m).
+ifeq ($(CONFIG_MTK_SCP),y)
 mtk-vcodec-common-y += mtk_vcodec_fw_scp.o
 endif
 

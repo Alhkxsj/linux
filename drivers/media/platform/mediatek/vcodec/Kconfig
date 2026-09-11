@@ -5,22 +5,30 @@ config VIDEO_MEDIATEK_VCODEC_SCP
 config VIDEO_MEDIATEK_VCODEC_VPU
 	bool
 
+config VIDEO_MEDIATEK_VCODEC_STUB
+	bool "MediaTek video codec without a firmware backend"
+	help
+	  The hardware is driven entirely from the kernel (stateless decoder),
+	  so no firmware backend is needed at all.
+
 config VIDEO_MEDIATEK_VCODEC
 	tristate "Mediatek Video Codec driver"
 	depends on V4L_MEM2MEM_DRIVERS
 	depends on MTK_IOMMU || COMPILE_TEST
 	depends on VIDEO_DEV
 	depends on ARCH_MEDIATEK || COMPILE_TEST
-	depends on VIDEO_MEDIATEK_VPU || MTK_SCP
+	depends on VIDEO_MEDIATEK_VPU || MTK_SCP || VIDEO_MEDIATEK_VCODEC_STUB
 	# The two following lines ensure we have the same state ("m" or "y") as
-	# our dependencies, to avoid missing symbols during link.
+	# our dependencies, to avoid missing symbols during link. The STUB
+	# backend is a bool (it links into the kernel itself), so it does not
+	# constrain the tristate state.
 	depends on VIDEO_MEDIATEK_VPU || !VIDEO_MEDIATEK_VPU
-	depends on MTK_SCP || !MTK_SCP
+	depends on MTK_SCP || !MTK_SCP || VIDEO_MEDIATEK_VCODEC_STUB
 	depends on MTK_SMI || (COMPILE_TEST && MTK_SMI=n)
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_MEM2MEM_DEV
 	select VIDEO_MEDIATEK_VCODEC_VPU if VIDEO_MEDIATEK_VPU
-	select VIDEO_MEDIATEK_VCODEC_SCP if MTK_SCP
+	select VIDEO_MEDIATEK_VCODEC_SCP if MTK_SCP=y
 	select V4L2_H264
 	select V4L2_VP9
 	select MEDIA_CONTROLLER
