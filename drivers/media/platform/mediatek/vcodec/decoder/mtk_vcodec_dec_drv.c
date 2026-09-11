@@ -345,6 +345,8 @@ static void mtk_vcodec_dec_get_chip_name(struct mtk_vcodec_dec_dev *vdec_dev)
 		vdec_dev->chip_name = MTK_VDEC_MT8186;
 	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8188-vcodec-dec"))
 		vdec_dev->chip_name = MTK_VDEC_MT8188;
+	else if (of_device_is_compatible(dev->of_node, "mediatek,mt6895-vcodec-dec"))
+		vdec_dev->chip_name = MTK_VDEC_MT6895;
 	else
 		vdec_dev->chip_name = MTK_VDEC_INVAL;
 }
