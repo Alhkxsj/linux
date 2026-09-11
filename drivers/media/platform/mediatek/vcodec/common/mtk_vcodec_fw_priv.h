@@ -8,6 +8,13 @@
 struct mtk_vcodec_dec_dev;
 struct mtk_vcodec_enc_dev;
 
+/* The stateless decoders register on the SCP_IPI_VDEC_LAT/CORE ids, which are
+ * small; the table only has to cover what the codec really uses. */
+#define MTK_VCODEC_STUB_MAX_IPI		32
+/* Enough messages to show the whole AP->firmware sequence once in dmesg
+ * without turning every decoded frame into a log line. */
+#define MTK_VCODEC_STUB_LOG_MSGS	32
+
 struct mtk_vcodec_fw {
 	enum mtk_vcodec_fw_type type;
 	const struct mtk_vcodec_fw_ops *ops;
@@ -17,6 +24,12 @@ struct mtk_vcodec_fw {
 	 * firmware-provided "vsi" shared memory */
 	void *vsi_buf;
 	dma_addr_t vsi_dma;
+	/* no-firmware backend: handlers the decoders registered, indexed by IPI
+	 * id, so replies synthesized on their behalf reach the right instance */
+	mtk_vcodec_ipi_handler stub_handler[MTK_VCODEC_STUB_MAX_IPI];
+	void *stub_priv[MTK_VCODEC_STUB_MAX_IPI];
+	u64 stub_inst_addr;
+	unsigned int stub_msg_count;
 	enum mtk_vcodec_fw_use fw_use;
 };
 
