@@ -14,10 +14,20 @@
 #include "mtk_vcodec_fw_priv.h"
 
 /*
- * Capability bits the decoder reads: no MTK_VCODEC_INNER_RACING (that needs
- * firmware cooperation), extended (stateless) mode supported.
+ * Capability mask the decoder reads. It drives which formats are exposed at
+ * open (mtk_vcodec_get_supported_formats()) and which hardware path is used:
+ * the stateless coded formats this SoC decodes, the capture formats, and the
+ * extended (multi-core lat+core) path. No MTK_VCODEC_INNER_RACING -- that one
+ * needs firmware cooperation.
  */
-#define MTK_VCODEC_STUB_DEC_CAPA	MTK_VDEC_IS_SUPPORT_EXT
+#define MTK_VCODEC_STUB_DEC_CAPA	(MTK_VDEC_FORMAT_MT21C | \
+					 MTK_VDEC_FORMAT_MM21 | \
+					 MTK_VDEC_FORMAT_H264_SLICE | \
+					 MTK_VDEC_FORMAT_HEVC_FRAME | \
+					 MTK_VDEC_FORMAT_VP8_FRAME | \
+					 MTK_VDEC_FORMAT_VP9_FRAME | \
+					 MTK_VDEC_FORMAT_AV1_FRAME | \
+					 MTK_VDEC_IS_SUPPORT_EXT)
 
 static int mtk_vcodec_fw_stub_load_firmware(struct mtk_vcodec_fw *fw)
 {
