@@ -2221,7 +2221,7 @@ static irqreturn_t mtk_dsi_irq_status(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	if (mtk_drm_top_clk_isr_get("dsi_irq") == false) {
-		DDPIRQ("%s, top clk off\n", __func__);
+		DDPDBG("%s, top clk off\n", __func__);
 		return IRQ_NONE;
 	}
 

@@ -1865,10 +1865,6 @@ static int mtk_iommu_map(struct iommu_domain *domain, unsigned long iova,
 {
 struct mtk_iommu_domain *dom = to_mtk_domain(domain);
 
-pr_info("XAGA-DOWN-IOMMU map iova=0x%lx pa=0x%llx size=0x%zx count=0x%zx dom=%p iommu_id=%d\n",
-iova, (unsigned long long)paddr, pgsize, pgcount, domain,
-dom->data ? dom->data->plat_data->iommu_id : -1);
-
 /* The "4GB mode" M4U physically can not use the lower remap of Dram. */
 if (dom->data->enable_4GB)
 paddr |= BIT_ULL(32);

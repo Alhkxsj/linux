@@ -192,7 +192,7 @@ static int gpueb_power_commit_locked(int target, int oppidx)
 		return -EIO;
 
 	if (commit_count++ < 64)
-		pr_info("XAGA-GPUEB: COMMIT target=%u idx=%d transport=%d ack=%d\n",
+		pr_debug("XAGA-GPUEB: COMMIT target=%u idx=%d transport=%d ack=%d\n",
 			target, oppidx, ret, gpueb_power_recv_msg.u.return_value);
 
 	if (gpueb_power_recv_msg.u.return_value < 0)
@@ -247,7 +247,7 @@ int mt6895_gpueb_power_control(unsigned int power_on)
 	 * commit OPP indexes from this path -- they are working-table indexes
 	 * and belong to the DVFS client via mt6895_gpueb_commit().
 	 */
-	pr_info("XAGA-GPUEB: power_control(%u) ret=%d\n", power_on, ret);
+	pr_debug("XAGA-GPUEB: power_control(%u) ret=%d\n", power_on, ret);
 
 out:
 	mutex_unlock(&gpueb_power_lock);
