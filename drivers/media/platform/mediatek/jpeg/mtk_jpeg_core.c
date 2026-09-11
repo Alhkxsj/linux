@@ -612,10 +612,37 @@ end:
 	return v4l2_m2m_qbuf(file, fh->m2m_ctx, buf);
 }
 
+static int mtk_jpeg_enc_enum_framesizes(struct file *file, void *fh,
+					struct v4l2_frmsizeenum *fsize)
+{
+	struct mtk_jpeg_ctx *ctx = mtk_jpeg_file_to_ctx(file);
+	struct mtk_jpeg_fmt *fmt;
+
+	if (fsize->index > 0)
+		return -EINVAL;
+
+	fmt = mtk_jpeg_find_format(ctx->jpeg->variant->formats,
+				   ctx->jpeg->variant->num_formats,
+				   fsize->pixel_format, MTK_JPEG_FMT_FLAG_OUTPUT);
+	if (!fmt)
+		return -EINVAL;
+
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = MTK_JPEG_MIN_WIDTH;
+	fsize->stepwise.min_height = MTK_JPEG_MIN_HEIGHT;
+	fsize->stepwise.max_width = MTK_JPEG_MAX_WIDTH;
+	fsize->stepwise.max_height = MTK_JPEG_MAX_HEIGHT;
+	fsize->stepwise.step_width = 1;
+	fsize->stepwise.step_height = 1;
+
+	return 0;
+}
+
 static const struct v4l2_ioctl_ops mtk_jpeg_enc_ioctl_ops = {
 	.vidioc_querycap                = mtk_jpeg_querycap,
 	.vidioc_enum_fmt_vid_cap	= mtk_jpeg_enum_fmt_vid_cap,
 	.vidioc_enum_fmt_vid_out	= mtk_jpeg_enum_fmt_vid_out,
+	.vidioc_enum_framesizes		= mtk_jpeg_enc_enum_framesizes,
 	.vidioc_try_fmt_vid_cap_mplane	= mtk_jpeg_try_fmt_vid_cap_mplane,
 	.vidioc_try_fmt_vid_out_mplane	= mtk_jpeg_try_fmt_vid_out_mplane,
 	.vidioc_g_fmt_vid_cap_mplane    = mtk_jpeg_g_fmt_vid_mplane,
@@ -946,6 +973,7 @@ static void mtk_jpeg_enc_device_run(void *priv)
 	dst_buf = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 
 	ret = pm_runtime_resume_and_get(jpeg->dev);
+	v4l2_dbg(2, debug, &jpeg->v4l2_dev, "enc run: pm=%d\n", ret);
 	if (ret < 0)
 		goto enc_end;
 
@@ -963,7 +991,14 @@ static void mtk_jpeg_enc_device_run(void *priv)
 	mtk_jpeg_set_enc_src(ctx, jpeg->reg_base, &src_buf->vb2_buf);
 	mtk_jpeg_set_enc_dst(ctx, jpeg->reg_base, &dst_buf->vb2_buf);
 	mtk_jpeg_set_enc_params(ctx, jpeg->reg_base);
+	v4l2_dbg(2, debug, &jpeg->v4l2_dev,
+		 "enc regs: CTRL=%#x IMG_SIZE=%#x SRC=%#x DST=%#x STRIDE=%#x QUALITY=%#x BLK_NUM=%#x\n",
+		 readl(jpeg->reg_base + 0x104), readl(jpeg->reg_base + 0x154),
+		 readl(jpeg->reg_base + 0x170), readl(jpeg->reg_base + 0x120),
+		 readl(jpeg->reg_base + 0x178), readl(jpeg->reg_base + 0x108),
+		 readl(jpeg->reg_base + 0x10c));
 	mtk_jpeg_enc_start(jpeg->reg_base);
+	ctx->state = MTK_JPEG_RUNNING;
 	spin_unlock_irqrestore(&jpeg->hw_lock, flags);
 	return;
 
@@ -1244,7 +1279,11 @@ static void mtk_jpeg_job_timeout_work(struct work_struct *work)
 	struct mtk_jpeg_ctx *ctx;
 	struct vb2_v4l2_buffer *src_buf, *dst_buf;
 
+	v4l2_dbg(2, debug, &jpeg->v4l2_dev, "enc job TIMEOUT\n");
+
 	ctx = v4l2_m2m_get_curr_priv(jpeg->m2m_dev);
+	if (!ctx)
+		return;
 	src_buf = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
 	dst_buf = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
 
@@ -1313,7 +1352,7 @@ static void mtk_jpeg_destroy_workqueue(void *data)
  *
  * Remove (default true) once the node is verified.
  */
-static bool jpeg_enable;
+static bool jpeg_enable = true;
 module_param(jpeg_enable, bool, 0644);
 
 static int mtk_jpeg_probe(struct platform_device *pdev)
@@ -1617,6 +1656,8 @@ static irqreturn_t mtk_jpeg_enc_done(struct mtk_jpeg_dev *jpeg)
 
 	result_size = mtk_jpeg_enc_get_file_size(jpeg->reg_base,
 						 jpeg->variant->support_34bit);
+	v4l2_dbg(2, debug, &jpeg->v4l2_dev, "enc done: size=%u dst_len=%u\n",
+		 result_size, dst_buf->vb2_buf.planes[0].length);
 	vb2_set_plane_payload(&dst_buf->vb2_buf, 0, result_size);
 
 	buf_state = VB2_BUF_STATE_DONE;
@@ -1850,10 +1891,14 @@ static irqreturn_t mtk_jpeg_enc_irq(int irq, void *priv)
 
 	cancel_delayed_work(&jpeg->job_timeout_work);
 
-	irq_status = readl(jpeg->reg_base + JPEG_ENC_INT_STS) &
-		     JPEG_ENC_INT_STATUS_MASK_ALLIRQ;
+	u32 raw_status = readl(jpeg->reg_base + JPEG_ENC_INT_STS);
+
+	irq_status = raw_status & JPEG_ENC_INT_STATUS_MASK_ALLIRQ;
 	if (irq_status)
 		writel(0, jpeg->reg_base + JPEG_ENC_INT_STS);
+
+	v4l2_dbg(2, debug, &jpeg->v4l2_dev, "enc irq: raw=%#x masked=%#x\n",
+		 raw_status, irq_status);
 
 	if (irq_status & JPEG_ENC_INT_STATUS_STALL)
 		dev_info(jpeg->dev,
