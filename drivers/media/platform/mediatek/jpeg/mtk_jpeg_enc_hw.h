@@ -13,6 +13,7 @@
 #include "mtk_jpeg_core.h"
 
 #define JPEG_ENC_INT_STATUS_DONE	BIT(0)
+#define JPEG_ENC_INT_STATUS_STALL	BIT(1)
 #define JPEG_ENC_INT_STATUS_MASK_ALLIRQ	0x13
 
 #define JPEG_ENC_DST_ADDR_OFFSET_MASK	GENMASK(3, 0)
@@ -22,6 +23,12 @@
 #define JPEG_ENC_CTRL_FILE_FORMAT_BIT	BIT(5)
 #define JPEG_ENC_CTRL_INT_EN_BIT	BIT(2)
 #define JPEG_ENC_CTRL_ENABLE_BIT	BIT(0)
+/* Source (RDMA) padding control. The vendor driver for this SoC family sets
+ * these when starting a job; without them the engine can raise STALL instead
+ * of DONE on the first frame. */
+#define JPEG_ENC_CTRL_RDMA_PADDING_EN		(1 << 20)
+#define JPEG_ENC_CTRL_RDMA_RIGHT_PADDING_EN	(1 << 29)
+#define JPEG_ENC_CTRL_RDMA_PADDING_0_EN		(1 << 30)
 #define JPEG_ENC_RESET_BIT		BIT(0)
 
 #define JPEG_ENC_YUV_FORMAT_YUYV	0

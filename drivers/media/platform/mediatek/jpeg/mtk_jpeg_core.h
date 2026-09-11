@@ -218,6 +218,8 @@ struct mtk_jpeg_dev {
 	spinlock_t		hw_lock;
 	struct workqueue_struct	*workqueue;
 	struct device		*dev;
+	/* SMI larb the JPEG engine DMAs through (mediatek,larb) */
+	struct device		*larb_dev;
 	struct v4l2_device	v4l2_dev;
 	struct v4l2_m2m_dev	*m2m_dev;
 	void			*alloc_ctx;

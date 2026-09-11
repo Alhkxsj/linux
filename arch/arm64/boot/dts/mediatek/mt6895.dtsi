@@ -2960,6 +2960,20 @@ block_size = <0x1000>;
 			clock-names = "apb", "smi";
 		};
 
+		/* Venc core0 SMI larb: JPEG-enc / venc0 DMA goes through it.
+		 * No init-power-on: the consumer (mtk-jpeg) resumes it through
+		 * mtk_smi_larb_get() so it stays passive until used. */
+		smi_larb7: smi_larb7@17010000 {
+			compatible = "mediatek,mt6895-smi-larb", "mediatek,smi-larb";
+			reg = <0x17010000 0x10000>;
+			mediatek,larb-id = <7>;
+			mediatek,smi = <&smi_common &smi_sysram_common>;
+			power-domains = <&spm 23>;
+			clocks = <&venc_gcon_clk CLK_VEN1_CKE1_VENC>,
+				 <&venc_gcon_clk CLK_VEN1_CKE0_LARB>;
+			clock-names = "apb", "smi";
+		};
+
 		smi_larb8: smi_larb8@17810000 {
 			compatible = "mediatek,mt6895-smi-larb", "mediatek,smi-larb";
 			reg = <0x17810000 0x10000>;
@@ -3609,6 +3623,24 @@ block_size = <0x1000>;
 			iommus = <&disp_iommu 0x2a5>;
 		};
 
+		/* JPEG encoder core0 (VEN0). Wiring copied from the device's own
+		 * firmware DT: iommus are M4U_LARB7_PORT7/8/9/16
+		 * ((larb << 5) | port), dma-ranges mirrors the display nodes. */
+		jpgenc: jpgenc@17030000 {
+			#address-cells = <2>;
+			#size-cells = <2>;
+			compatible = "mediatek,mt6895-jpgenc", "mediatek,mtk-jpgenc";
+			reg = <0x17030000 0x10000>;
+			interrupts = <GIC_SPI 419 IRQ_TYPE_LEVEL_HIGH 0>;
+			clocks = <&venc_gcon_clk CLK_VEN1_CKE2_JPGENC>;
+			clock-names = "jpgenc";
+			power-domains = <&spm 23>;
+			mediatek,larb = <&smi_larb7>;
+			dma-ranges = <0x0 0x0 0x0 0x4 0x0>;
+			iommus = <&disp_iommu 0xe7>, <&disp_iommu 0xe8>,
+				 <&disp_iommu 0xe9>, <&disp_iommu 0xf0>;
+		};
+
 		disp_wdma3: disp_wdma1@1441f000 {
 			#address-cells = <2>;
 			#size-cells = <2>;
@@ -3650,6 +3682,13 @@ block_size = <0x1000>;
 		vdec_gcon_base_clk: syscon@1602f000 {
 			compatible = "mediatek,mt6895-vdec_gcon_base", "syscon";
 			reg = <0x1602f000 0x1000>;
+			#clock-cells = <1>;
+			hw-voter-regmap = <&hwv>;
+		};
+
+		venc_gcon_clk: syscon@17000000 {
+			compatible = "mediatek,mt6895-vencsys", "syscon";
+			reg = <0x17000000 0x1000>;
 			#clock-cells = <1>;
 			hw-voter-regmap = <&hwv>;
 		};

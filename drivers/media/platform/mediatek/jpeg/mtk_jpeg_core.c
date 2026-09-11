@@ -23,6 +23,8 @@
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 
+#include <soc/mediatek/smi.h>
+
 #include "mtk_jpeg_enc_hw.h"
 #include "mtk_jpeg_dec_hw.h"
 #include "mtk_jpeg_core.h"
@@ -1109,10 +1111,17 @@ static void mtk_jpeg_clk_on(struct mtk_jpeg_dev *jpeg)
 				      jpeg->variant->clks);
 	if (ret)
 		dev_err(jpeg->dev, "Failed to open jpeg clk: %d\n", ret);
+
+	/* The engine's DMA goes through this larb: power it with the clocks. */
+	if (jpeg->larb_dev)
+		mtk_smi_larb_get(jpeg->larb_dev);
 }
 
 static void mtk_jpeg_clk_off(struct mtk_jpeg_dev *jpeg)
 {
+	if (jpeg->larb_dev)
+		mtk_smi_larb_put(jpeg->larb_dev);
+
 	clk_bulk_disable_unprepare(jpeg->variant->num_clks,
 				   jpeg->variant->clks);
 }
@@ -1294,16 +1303,52 @@ static void mtk_jpeg_destroy_workqueue(void *data)
 	destroy_workqueue(data);
 }
 
+/*
+ * WORKAROUND(bring-up): hold the driver off until someone asks for it, so a
+ * mis-modelled JPEG node cannot disturb the boot. Bring the encoder up on the
+ * running system with
+ *
+ *   echo 1 > /sys/module/mtk_jpeg/parameters/jpeg_enable
+ *   echo 17030000.jpgenc > /sys/bus/platform/drivers/mtk-jpeg/bind
+ *
+ * Remove (default true) once the node is verified.
+ */
+static bool jpeg_enable;
+module_param(jpeg_enable, bool, 0644);
+
 static int mtk_jpeg_probe(struct platform_device *pdev)
 {
 	struct mtk_jpeg_dev *jpeg;
 	struct device_node *child;
+	struct device_node *larb_node;
+	struct platform_device *larb_pdev;
 	int num_child = 0;
 	int ret;
+
+	if (!jpeg_enable)
+		return -ENODEV;
 
 	jpeg = devm_kzalloc(&pdev->dev, sizeof(*jpeg), GFP_KERNEL);
 	if (!jpeg)
 		return -ENOMEM;
+
+	/* The engine DMAs through the MTK IOMMU, whose IOVA window is 34 bit
+	 * (same mask the display drivers set). Without it every buffer
+	 * allocation fails with "dma alloc of size ... failed". */
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(34));
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to set DMA mask: %d\n", ret);
+		return ret;
+	}
+
+	larb_node = of_parse_phandle(pdev->dev.of_node, "mediatek,larb", 0);
+	if (larb_node) {
+		larb_pdev = of_find_device_by_node(larb_node);
+		of_node_put(larb_node);
+		if (!larb_pdev)
+			return -EPROBE_DEFER;
+		jpeg->larb_dev = &larb_pdev->dev;
+	}
 
 	mutex_init(&jpeg->lock);
 	spin_lock_init(&jpeg->hw_lock);
@@ -1810,9 +1855,18 @@ static irqreturn_t mtk_jpeg_enc_irq(int irq, void *priv)
 	if (irq_status)
 		writel(0, jpeg->reg_base + JPEG_ENC_INT_STS);
 
-	if (!(irq_status & JPEG_ENC_INT_STATUS_DONE))
-		return ret;
+	if (irq_status & JPEG_ENC_INT_STATUS_STALL)
+		dev_info(jpeg->dev,
+			 "irq stall (status %#x): check output buffer size\n",
+			 irq_status);
 
+	/*
+	 * The vendor driver completes the job unconditionally: this engine can
+	 * raise an interrupt whose status reads back as 0 (observed on MT6895),
+	 * and requiring DONE leaves the job unfinished, which blocks the client
+	 * forever. mtk_jpeg_enc_done() is safe without a running job -- it logs
+	 * "Context is NULL" and returns.
+	 */
 	ret = mtk_jpeg_enc_done(jpeg);
 	return ret;
 }
@@ -1904,6 +1958,26 @@ static const struct mtk_jpeg_variant mtk_jpeg_drvdata = {
 	.multi_core = false,
 };
 
+static const struct mtk_jpeg_variant mt6895_jpegenc_drvdata = {
+	.clks = mtk_jpeg_clocks,
+	.num_clks = ARRAY_SIZE(mtk_jpeg_clocks),
+	.formats = mtk_jpeg_enc_formats,
+	.num_formats = MTK_JPEG_ENC_NUM_FORMATS,
+	.qops = &mtk_jpeg_enc_qops,
+	.irq_handler = mtk_jpeg_enc_irq,
+	.hw_reset = mtk_jpeg_enc_reset,
+	.m2m_ops = &mtk_jpeg_enc_m2m_ops,
+	.dev_name = "mtk-jpeg-enc",
+	.ioctl_ops = &mtk_jpeg_enc_ioctl_ops,
+	.out_q_default_fourcc = V4L2_PIX_FMT_YUYV,
+	.cap_q_default_fourcc = V4L2_PIX_FMT_JPEG,
+	.multi_core = false,
+	/* MT6895 addresses the engine through a 34-bit IOVA window. Without
+	 * this the upper address bits are never written and the encoded size
+	 * register is decoded 4x too small (clamped payload + empty output). */
+	.support_34bit = true,
+};
+
 static struct mtk_jpeg_variant mtk8195_jpegenc_drvdata = {
 	.formats = mtk_jpeg_enc_formats,
 	.num_formats = MTK_JPEG_ENC_NUM_FORMATS,
@@ -1938,6 +2012,10 @@ static const struct of_device_id mtk_jpeg_match[] = {
 	{
 		.compatible = "mediatek,mt2701-jpgdec",
 		.data = &mt8173_jpeg_drvdata,
+	},
+	{
+		.compatible = "mediatek,mt6895-jpgenc",
+		.data = &mt6895_jpegenc_drvdata,
 	},
 	{
 		.compatible = "mediatek,mtk-jpgenc",
