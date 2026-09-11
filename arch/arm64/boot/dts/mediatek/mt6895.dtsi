@@ -3720,14 +3720,14 @@ block_size = <0x1000>;
 		vdec: video-codec@16000000 {
 			compatible = "mediatek,mt6895-vcodec-dec";
 			reg = <0x16000000 0x1000>, <0x1602f000 0x1000>;
-			ranges = <0 0 0x16000000 0x30000>;
-			#address-cells = <2>;
-			#size-cells = <2>;
+			ranges = <0 0x16000000 0x30000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
 			iommus = <&mdp_iommu 0x80>;
 
 			video-codec@f000 {
 				compatible = "mediatek,mtk-vcodec-lat-soc";
-				reg = <0 0xf000 0 0x800>;
+				reg = <0xf000 0x800>;
 				iommus = <&mdp_iommu 0x80>, <&mdp_iommu 0x81>,
 					 <&mdp_iommu 0x82>, <&mdp_iommu 0x83>,
 					 <&mdp_iommu 0x84>, <&mdp_iommu 0x85>;
@@ -3739,7 +3739,7 @@ block_size = <0x1000>;
 
 			video-codec@10000 {
 				compatible = "mediatek,mtk-vcodec-lat";
-				reg = <0 0x10000 0 0x800>;
+				reg = <0x10000 0x800>;
 				interrupts = <GIC_SPI 605 IRQ_TYPE_LEVEL_HIGH 0>;
 				iommus = <&mdp_iommu 0x10088>;
 				clocks = <&vdec_soc_gcon_base_clk CLK_VDE1_LAT_CKEN>;
@@ -3749,7 +3749,7 @@ block_size = <0x1000>;
 
 			video-codec@20000 {
 				compatible = "mediatek,mtk-vcodec-core";
-				reg = <0 0x20000 0 0x800>;
+				reg = <0x20000 0x800>;
 				interrupts = <GIC_SPI 608 IRQ_TYPE_LEVEL_HIGH 0>;
 				iommus = <&mdp_iommu 0x89>, <&mdp_iommu 0x8a>;
 				clocks = <&vdec_gcon_base_clk CLK_VDE2_VDEC_CKEN>;
