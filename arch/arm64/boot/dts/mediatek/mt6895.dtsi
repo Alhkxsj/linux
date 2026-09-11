@@ -3666,8 +3666,46 @@ block_size = <0x1000>;
 				 <&disp_iommu 0xe9>, <&disp_iommu 0xf0>;
 		};
 
-		disp_wdma3: disp_wdma1@1441f000 {
-			#address-cells = <2>;
+		/* The two JPEG decoder cores, 0x17040000/0x17050000, from the
+		 * device's own firmware DT (compatible strings differ: it calls
+		 * them mediatek,jpgdec0). Same split as mt8195: the parent only
+		 * owns the M2M queues, each -hw child owns its core's registers,
+		 * clock gate and interrupt (vector 0x1a4/0x1a5 there). */
+		jpegdec: jpeg-decoder@17040000 {
+			compatible = "mediatek,mt6895-jpgdec";
+			power-domains = <&spm 23>;
+			mediatek,larb = <&smi_larb7>;
+			iommus = <&disp_iommu 0xf1>, <&disp_iommu 0xf2>,
+				 <&disp_iommu 0xfb>, <&disp_iommu 0xfc>,
+				 <&disp_iommu 0xfd>, <&disp_iommu 0xfe>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0 0x17040000 0x20000>;
+
+			jpgdec0: jpgdec@0 {
+				compatible = "mediatek,mt6895-jpgdec-hw";
+				reg = <0x0 0x10000>;
+				interrupts = <GIC_SPI 420 IRQ_TYPE_LEVEL_HIGH 0>;
+				clocks = <&venc_gcon_clk CLK_VEN1_CKE3_JPGDEC>;
+				power-domains = <&spm 23>;
+				iommus = <&disp_iommu 0xf1>, <&disp_iommu 0xf2>,
+					 <&disp_iommu 0xfb>, <&disp_iommu 0xfc>,
+					 <&disp_iommu 0xfd>, <&disp_iommu 0xfe>;
+			};
+
+			jpgdec1: jpgdec@10000 {
+				compatible = "mediatek,mt6895-jpgdec-hw";
+				reg = <0x10000 0x10000>;
+				interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH 0>;
+				clocks = <&venc_gcon_clk CLK_VEN1_CKE4_JPGDEC_C1>;
+				power-domains = <&spm 23>;
+				iommus = <&disp_iommu 0xf1>, <&disp_iommu 0xf2>,
+					 <&disp_iommu 0xfb>, <&disp_iommu 0xfc>,
+					 <&disp_iommu 0xfd>, <&disp_iommu 0xfe>;
+			};
+		};
+
+		disp_wdma3: disp_wdma1@1441f000 {			#address-cells = <2>;
 			#size-cells = <2>;
 			compatible = "mediatek,mt6895-disp-wdma";
 			reg = <0x1441f000 0x1000>;

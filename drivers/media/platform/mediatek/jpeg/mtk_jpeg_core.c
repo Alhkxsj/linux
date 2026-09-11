@@ -1355,6 +1355,18 @@ static void mtk_jpeg_destroy_workqueue(void *data)
 static bool jpeg_enable = true;
 module_param(jpeg_enable, bool, 0644);
 
+/*
+ * The decoder needs its own switch on top of jpeg_enable: a decode that fails
+ * its format check currently leaves state behind that oopses in vb2's free
+ * path on close (and this kernel panics on oops), so keep the decoder out of
+ * reach of anything that might poke at it until that is fixed. Turn it on with
+ *
+ *   echo 1 > /sys/module/mtk_jpeg/parameters/jpegdec_enable
+ *   echo 17040000.jpeg-decoder > /sys/bus/platform/drivers/mtk-jpeg/bind
+ */
+static bool jpegdec_enable;
+module_param(jpegdec_enable, bool, 0644);
+
 static int mtk_jpeg_probe(struct platform_device *pdev)
 {
 	struct mtk_jpeg_dev *jpeg;
@@ -1365,6 +1377,10 @@ static int mtk_jpeg_probe(struct platform_device *pdev)
 	int ret;
 
 	if (!jpeg_enable)
+		return -ENODEV;
+
+	if (!jpegdec_enable &&
+	    of_device_is_compatible(pdev->dev.of_node, "mediatek,mt6895-jpgdec"))
 		return -ENODEV;
 
 	jpeg = devm_kzalloc(&pdev->dev, sizeof(*jpeg), GFP_KERNEL);
@@ -2023,6 +2039,22 @@ static const struct mtk_jpeg_variant mt6895_jpegenc_drvdata = {
 	.support_34bit = true,
 };
 
+/* Same 34-bit IOVA window as the encoder above; the two decoder cores are
+ * described by the mediatek,mt6895-jpgdec-hw children. */
+static const struct mtk_jpeg_variant mt6895_jpegdec_drvdata = {
+	.formats = mtk_jpeg_dec_formats,
+	.num_formats = MTK_JPEG_DEC_NUM_FORMATS,
+	.qops = &mtk_jpeg_dec_qops,
+	.m2m_ops = &mtk_jpeg_multicore_dec_m2m_ops,
+	.dev_name = "mtk-jpeg-dec",
+	.ioctl_ops = &mtk_jpeg_dec_ioctl_ops,
+	.out_q_default_fourcc = V4L2_PIX_FMT_JPEG,
+	.cap_q_default_fourcc = V4L2_PIX_FMT_YUV420M,
+	.multi_core = true,
+	.support_34bit = true,
+	.jpeg_worker = mtk_jpegdec_worker,
+};
+
 static struct mtk_jpeg_variant mtk8195_jpegenc_drvdata = {
 	.formats = mtk_jpeg_enc_formats,
 	.num_formats = MTK_JPEG_ENC_NUM_FORMATS,
@@ -2073,6 +2105,10 @@ static const struct of_device_id mtk_jpeg_match[] = {
 	{
 		.compatible = "mediatek,mt8195-jpgdec",
 		.data = &mtk8195_jpegdec_drvdata,
+	},
+	{
+		.compatible = "mediatek,mt6895-jpgdec",
+		.data = &mt6895_jpegdec_drvdata,
 	},
 	{},
 };
