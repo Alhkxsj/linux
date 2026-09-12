@@ -1534,12 +1534,12 @@
 
 			/*
 			 * Boot-mode field the bootloader reads on the next start.
-			 * Values are taken verbatim from the device's own firmware
-			 * DT, which carries this identical node; a mode name that is
-			 * not listed here makes reboot-mode.c write nothing, so a
-			 * plain reboot leaves the register alone.
-			 * mode-edl is deliberately omitted: it would hand userland a
-			 * software path into EDL, which then needs a PC to leave.
+			 * The values match the official 5.10 tree
+			 * (include/dt-bindings/soc/mediatek,boot-mode.h) and the
+			 * device's own firmware DT, which carries this identical
+			 * node; a mode name that is not listed here makes
+			 * reboot-mode.c write nothing, so a plain reboot leaves the
+			 * register alone.
 			 */
 			reboot-mode {
 				compatible = "syscon-reboot-mode";
@@ -1558,6 +1558,7 @@
 				mode-sau = <0x0b>;
 				mode-sblmemtest = <0x0c>;
 				mode-ftm = <0x0d>;
+				mode-edl = <0x0e>;
 			};
 		};
 
