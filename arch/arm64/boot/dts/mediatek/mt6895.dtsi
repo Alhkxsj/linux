@@ -1529,8 +1529,36 @@
 		watchdog: watchdog@1c007000 {
 			compatible = "mediatek,mt6895-wdt",
 				     "mediatek,mt6589-wdt",
-				     "syscon";
+				     "syscon", "simple-mfd";
 			reg = <0x1c007000 0x100>;
+
+			/*
+			 * Boot-mode field the bootloader reads on the next start.
+			 * Values are taken verbatim from the device's own firmware
+			 * DT, which carries this identical node; a mode name that is
+			 * not listed here makes reboot-mode.c write nothing, so a
+			 * plain reboot leaves the register alone.
+			 * mode-edl is deliberately omitted: it would hand userland a
+			 * software path into EDL, which then needs a PC to leave.
+			 */
+			reboot-mode {
+				compatible = "syscon-reboot-mode";
+				offset = <0x24>;
+				mask = <0x0f>;
+				mode-charger = <0x01>;
+				mode-recovery = <0x02>;
+				mode-bootloader = <0x03>;
+				mode-dm-verity-dev-corrupt = <0x04>;
+				mode-kpoc = <0x05>;
+				mode-ddr-reserve = <0x06>;
+				mode-meta = <0x07>;
+				mode-rpmbpk = <0x08>;
+				mode-kernel = <0x09>;
+				mode-silence = <0x0a>;
+				mode-sau = <0x0b>;
+				mode-sblmemtest = <0x0c>;
+				mode-ftm = <0x0d>;
+			};
 		};
 
 		/*
