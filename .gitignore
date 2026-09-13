@@ -196,3 +196,6 @@ docs-local/
 /usr/xagairamfs.list
 /firmware/
 /firmware/
+
+# bench logs (contain device MACs/serial-ish data; never publish)
+logs/
