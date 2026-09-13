@@ -268,11 +268,12 @@
 	 * no filesystem, so the addresses sit at fixed offsets and can be read
 	 * as plain nvmem cells:
 	 *
-	 *   0x68  6 bytes  Bluetooth BD_ADDR   (2c:a7:ef:46:96:d6 on this unit)
-	 *   0x6e  6 bytes  WiFi MAC            (…d7, one more than the BD_ADDR)
+	 *   0x68  6 bytes  Bluetooth BD_ADDR
+	 *   0x6e  6 bytes  WiFi MAC (the BD_ADDR plus one)
 	 *
 	 * Both are byte-for-byte copies of /nvdata/APCFG/APRDEB/{BT_Addr,WIFI+4},
-	 * which is what the vendor userspace daemon reads.
+	 * which is what the vendor userspace daemon reads. The values are per-unit
+	 * and deliberately not written down here.
 	 */
 	proinfo_nvmem: nvmem {
 		compatible = "mediatek,partition-nvmem";
