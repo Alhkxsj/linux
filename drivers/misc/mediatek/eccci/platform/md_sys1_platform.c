@@ -1083,6 +1083,17 @@ static int md_cd_let_md_go(struct ccci_modem *md)
 	CCCI_BOOTUP_LOG(md->index, TAG, "[POWER ON]set MD boot slave\n");
 	CCCI_NORMAL_LOG(md->index, TAG, "[POWER ON]set MD boot slave\n");
 
+	/*
+	 * qqcandy: grant the MD clock source before releasing it. On the
+	 * vendor device LK leaves the AP_MDSRC handshake granted; our boot
+	 * does not, and the modem then stalls in its clock init (AP_MDSRC_REQ
+	 * read as 0x31 via the MD debug dump). The same MD_CLOCK_REQUEST
+	 * sequence is proven safe inside the EE dump path.
+	 */
+	md_cd_lock_modem_clock_src(1);
+	CCCI_BOOTUP_LOG(md->index, TAG,
+		"[POWER ON] md clock source locked\n");
+
 	/* make boot vector take effect */
 	arm_smccc_smc(MTK_SIP_KERNEL_CCCI_CONTROL, MD_POWER_CONFIG,
 		MD_KERNEL_BOOT_UP, 0, 0, 0, 0, 0, &res);
