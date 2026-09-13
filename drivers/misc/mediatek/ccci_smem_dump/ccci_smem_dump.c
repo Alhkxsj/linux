@@ -86,7 +86,40 @@ MODULE_PARM_DESC(mdimg_read,
 static bool ccci_smem_dump_bp_clear;
 module_param_named(bp_clear, ccci_smem_dump_bp_clear, bool, 0600);
 MODULE_PARM_DESC(bp_clear,
-		 "deassert the MD-domain AXI bus protection at load (see HANDOFF §80.36)");
+		 "deassert the MD-domain AXI bus protection at load (see HANDOFF 80.36)");
+
+/*
+ * Optional and off by default: apply the vendor's MD source-clock-enable
+ * setting (INFRA_AO_MD_SRCCLKENA, infra_ao+0xF0C) exactly as
+ * md_cd_srcclkena_setting() does - keep the upper bits, put 0x21 in the low
+ * byte. That vendor step is bypassed on our power_flow_config (bit0 clear, and
+ * the same is true of the official mt6895.dts), yet the device reads the low
+ * byte back as 0x00, i.e. the modem's source clock may never have been
+ * enabled. Same always-on infracfg block and same write class as the CCIF
+ * gate writes we already do, and enabling a clock is the benign direction.
+ */
+static bool ccci_smem_dump_srcclkena;
+module_param_named(srcclkena, ccci_smem_dump_srcclkena, bool, 0600);
+MODULE_PARM_DESC(srcclkena,
+		 "apply the vendor MD_SRCCLKENA=0x21 setting at load (see HANDOFF 80.39)");
+
+static void ccci_smem_dump_srcclkena_run(void)
+{
+	void *ao = ioremap(0x0000000010001000ULL, 0x1000);
+	unsigned int before, after;
+
+	if (!ao) {
+		pr_info("CCCI-SMEM: srcclkena: infra_ao ioremap failed\n");
+		return;
+	}
+	before = readl(ao + 0x0f0c);
+	writel((before & ~0xffU) | 0x21U, ao + 0x0f0c);
+	mb();
+	after = readl(ao + 0x0f0c);
+	pr_info("CCCI-SMEM: srcclkena: MD_SRCCLKENA before=0x%08x after=0x%08x%s\n",
+		before, after, (after & 0xff) == 0x21 ? " (write took)" : " (write did NOT stick)");
+	iounmap(ao);
+}
 
 static void ccci_smem_dump_bp_clear_run(void)
 {
@@ -895,6 +928,8 @@ static int __init ccci_smem_dump_init(void)
 	mutex_unlock(&ccci_smem_dump_lock);
 	if (ccci_smem_dump_bp_clear)
 		ccci_smem_dump_bp_clear_run();
+	if (ccci_smem_dump_srcclkena)
+		ccci_smem_dump_srcclkena_run();
 	pr_info("CCCI-SMEM: ready; nothing mapped or read; runtime trigger required\n");
 	return 0;
 }
