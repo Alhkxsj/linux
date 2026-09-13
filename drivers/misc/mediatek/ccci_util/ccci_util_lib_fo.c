@@ -1732,6 +1732,11 @@ int __init ccci_util_fo_init(void)
 	int idx;
 	struct device_node *node = NULL;
 
+	/* qqcandy: the modem firmware is LK-loaded (ld_flag=1 verified on
+	 * device) and MD_SYS1 must report enabled for the eccci probe. The
+	 * option-tag path below stays gated off, so set the enable bit here. */
+	s_g_md_usage_case |= (1 << MD_SYS1);
+
 	/* qqcandy: nothing below is safe until explicitly asked for */
 	if (!ccci_util_probe) {
 		pr_info("CCCI-PROBE: tag/modem-info parse disabled (ccci_util_probe=0)\n");

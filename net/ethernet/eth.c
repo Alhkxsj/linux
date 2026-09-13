@@ -328,6 +328,8 @@ int eth_validate_addr(struct net_device *dev)
 }
 EXPORT_SYMBOL(eth_validate_addr);
 
+/* qqcandy: exported for the ported MediaTek eccci/ccmni netdevs. */
+EXPORT_SYMBOL_GPL(eth_header_ops);
 const struct header_ops eth_header_ops ____cacheline_aligned = {
 	.create		= eth_header,
 	.parse		= eth_header_parse,

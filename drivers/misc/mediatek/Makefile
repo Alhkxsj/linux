@@ -13,5 +13,6 @@ obj-$(CONFIG_MTK_SECURITY_SW_SUPPORT) += masp/
 obj-$(CONFIG_MTK_CCCI_UTIL) += ccci_util/
 obj-$(CONFIG_MTK_CCCI_CORE) += ccci_core/
 obj-$(CONFIG_MTK_CCCI_SMEM_DUMP) += ccci_smem_dump/
-obj-$(CONFIG_MTK_CCCI_CCIF) += ccci_ccif/
+obj-$(CONFIG_MTK_CCI_DIAG) += ccci_diag/
+obj-$(CONFIG_MTK_ECCCI_DRIVER) += eccci/
 obj-$(CONFIG_MTK_CCCI_PROBE_MODULE) += ccci_probe/

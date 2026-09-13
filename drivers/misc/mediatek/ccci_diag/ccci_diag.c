@@ -1193,5 +1193,5 @@ static void __exit ccif_mod_exit(void)
 }
 module_exit(ccif_mod_exit);
 
-MODULE_DESCRIPTION("MediaTek CCI CCIF staged bring-up diagnostic (qqcandy)");
+MODULE_DESCRIPTION("MediaTek CCI staged bring-up diagnostic (qqcandy)");
 MODULE_LICENSE("GPL");

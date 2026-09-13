@@ -31,6 +31,10 @@
 /* AUDIO related SMC call */
 #define MTK_SIP_AUDIO_CONTROL		MTK_SIP_SMC_CMD(0x517)
 
+/* CCCI related SMC call */
+#define MTK_SIP_KERNEL_CCCI_CONTROL	MTK_SIP_SMC_CMD(0x505)
+#define MTK_SIP_KERNEL_GET_RND		MTK_SIP_SMC_CMD(0x26A)
+
 /* CMDQ related SMC call (GCE prebuilt / disp-VA / mminfra control) */
 #define MTK_SIP_CMDQ_CONTROL		MTK_SIP_SMC_CMD(0x518)
 
