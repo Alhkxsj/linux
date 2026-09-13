@@ -478,6 +478,20 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 			if (!hits)
 				pr_info("CCCI-SMEM: EPON magic 0xBAEBAE10 not found in RAW_MDSS_DBG\n");
 		}
+		/* The MD copies its CCIF SRAM snapshot into MDSS_DBG at
+		 * CCCI_EE_OFFSET_CCIF_SRAM (952) when it throws an
+		 * exception; dump the surrounding window too. */
+		idx = ccci_smem_layout_find(tbl, CCCI_SMEM_FAT_NUM,
+					    SMEM_USER_RAW_MDSS_DBG);
+		if (idx >= 0 && tbl[idx].size >= 0x420)
+			ccci_smem_dump_hex32(smem_map, smem_size,
+					     tbl[idx].offset + 0x3a0, 28,
+					     "MDSS_CCIFSNAP");
+		/* MDSS head: the MD's own boot log / state view. */
+		if (idx >= 0 && tbl[idx].size >= 0x100)
+			ccci_smem_dump_hex32(smem_map, smem_size,
+					     tbl[idx].offset, 32,
+					     "MDSS_HEAD");
 		idx = ccci_smem_layout_find(tbl, CCCI_SMEM_FAT_NUM,
 					    SMEM_USER_CCISM_MCU);
 		if (idx >= 0 && tbl[idx].size >= 64)
