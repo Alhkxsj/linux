@@ -1096,6 +1096,36 @@ static int __init collect_lk_boot_arguments(void)
 		goto _common_process;
 	}
 
+	/*
+	 * qqcandy: neither property is in the live tree, because we boot our
+	 * embedded DTB rather than LK's FDT - yet LK *did* inject
+	 * ccci,modem_info_v2 there and setup_arch stashed it verbatim
+	 * (arch/arm64/kernel/setup.c, the "CCCI-LKINFO" block). Hand that copy
+	 * to the very same parser the official kernel uses so the tag-derived
+	 * layouts (options, MD memory, md1_chk, shared memory) come out exactly
+	 * as on stock. Byte-for-byte identical to LK's FDT property, see
+	 * HANDOFF §80.33.
+	 */
+	{
+		extern u8 xaga_ccci_lk_prop[];
+		extern int xaga_ccci_lk_prop_len;
+		extern char xaga_ccci_lk_prop_name[];
+
+		pr_notice("CCCI-LKINFO: fallback len=%d name=%s\n",
+			  xaga_ccci_lk_prop_len, xaga_ccci_lk_prop_name);
+		if (xaga_ccci_lk_prop_len > 0) {
+			if (!strcmp(xaga_ccci_lk_prop_name,
+				    "ccci,modem_info_v2")) {
+				if (lk_info_parsing_v2(
+				    (unsigned int *)xaga_ccci_lk_prop) == 1)
+					return 0;
+				goto _common_process;
+			}
+			lk_info_parsing_v1((unsigned int *)xaga_ccci_lk_prop);
+			goto _common_process;
+		}
+	}
+
 	CCCI_UTIL_INF_MSG("ccci,modem_info_v1 still not found, using v0!!!\n");
 	return -1;
 
@@ -1737,11 +1767,14 @@ int __init ccci_util_fo_init(void)
 	 * option-tag path below stays gated off, so set the enable bit here. */
 	s_g_md_usage_case |= (1 << MD_SYS1);
 
-	/* qqcandy: nothing below is safe until explicitly asked for */
-	if (!ccci_util_probe) {
-		pr_info("CCCI-PROBE: tag/modem-info parse disabled (ccci_util_probe=0)\n");
-		return 0;
-	}
+	/*
+	 * qqcandy: the ccci_util_probe gate that used to sit here is gone.
+	 * collect_lk_boot_arguments() now reaches _common_process through the
+	 * LKINFO stash fallback even without the DT property, so the official
+	 * LK parse (options, MD memory, md1_chk, shared memory) is exactly what
+	 * we want at load: it fills the MD reserved memory, smem and ccb
+	 * layouts that the modem boot depends on (HANDOFF 80.33).
+	 */
 
 	CCCI_UTIL_INF_MSG("%s 0.\n", __func__);
 
