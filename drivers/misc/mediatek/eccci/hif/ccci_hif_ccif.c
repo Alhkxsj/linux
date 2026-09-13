@@ -2023,6 +2023,41 @@ static int ccif_late_init(unsigned char hif_id)
 	return 0;
 }
 
+/*
+ * qqcandy: raw infra-ao gate fallback for the six CCIF clocks while the
+ * clk-bus provider is not ported. Bit list from the official
+ * clk-mt6895-bus.c; verified latch behaviour on device (HANDOFF 80.17).
+ */
+#define CCI_RAW_IFRAO1_SET_BITS ((1u << 12) | (1u << 13) | \
+				 (1u << 23) | (1u << 26))
+#define CCI_RAW_IFRAO3_SET_BITS ((1u << 10) | (1u << 29))
+
+static void ccif_raw_gates(struct md_ccif_ctrl *ccif_ctrl, bool on)
+{
+	unsigned int any_clk = 0;
+	int idx;
+
+	for (idx = 0; idx < ARRAY_SIZE(ccif_clk_table); idx++)
+		if (ccif_clk_table[idx].clk_ref)
+			any_clk = 1;
+	if (any_clk)
+		return;
+
+	if (on) {
+		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x88,
+			     CCI_RAW_IFRAO1_SET_BITS);
+		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC0,
+			     CCI_RAW_IFRAO3_SET_BITS);
+		pr_info("CCI-CCIF: raw gate ON (IFRAO1 0x4803000, IFRAO3 0x2000400)\n");
+	} else {
+		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x8C,
+			     CCI_RAW_IFRAO1_SET_BITS);
+		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC4,
+			     CCI_RAW_IFRAO3_SET_BITS);
+		pr_info("CCI-CCIF: raw gate OFF\n");
+	}
+}
+
 static void ccif_set_clk_on(unsigned char hif_id)
 {
 	struct md_ccif_ctrl *ccif_ctrl =
@@ -2031,6 +2066,8 @@ static void ccif_set_clk_on(unsigned char hif_id)
 	unsigned long flags;
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s start\n", __func__);
+
+	ccif_raw_gates(ccif_ctrl, true);
 
 	for (idx = 0; idx < ARRAY_SIZE(ccif_clk_table); idx++) {
 		if (ccif_clk_table[idx].clk_ref == NULL)

@@ -1896,6 +1896,23 @@ bias-disable;
 	 * property is deliberately absent: LK passes it via the LKINFO
 	 * stash and the diagnostics prefer the stash anyway.
 	 */
+	/*
+	 * AP<->MD CCIF hardware interface (stock FDT 2912; official
+	 * mt6895.dts ccifdriver). Clock gates are driven by raw infra-ao
+	 * set/clr writes in ccci_diag/ccif for now (the clk-bus provider
+	 * port is deferred), so no clocks property here.
+	 */
+	ccifdriver: ccifdriver@10209000 {
+		compatible = "mediatek,ccci_ccif";
+		reg = <0 0x10209000 0 0x1000>,
+		      <0 0x1020a000 0 0x1000>,
+		      <0 0x1023c000 0 0x1000>,
+		      <0 0x1023d000 0 0x1000>;
+		mediatek,sram_size = <0x200>;
+		interrupts = <GIC_SPI 241 IRQ_TYPE_LEVEL_HIGH 0>,
+			     <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH 0>;
+	};
+
 	ccci_md0: mddriver {
 		compatible = "mediatek,mddriver";
 		mediatek,mdhif_type = <6>;	/* bit1 CCIF | bit2 DPMAIF */
