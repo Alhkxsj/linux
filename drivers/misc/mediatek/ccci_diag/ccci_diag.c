@@ -133,6 +133,10 @@
 #define CCCI_SIP_CCCI_CONTROL	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, \
 				ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_SIP, 0x505)
 #define CCCI_SMC_MD_POWER_CONFIG	6u
+#define CCI_SMC_MD_CLOCK_REQUEST	5u
+#define CCI_SMC_MD_REG_AP_MDSRC_REQ	0u
+#define CCI_SMC_MD_REG_AP_MDSRC_ACK	1u
+#define CCI_SMC_MD_REG_AP_MDSRC_SETTLE	2u
 #define CCCI_SMC_MD_FLIGHT_MODE		7u
 #define CCCI_SMC_MD_CHECK_FLAG		2u
 #define CCCI_SMC_MD_CHECK_DONE		3u
@@ -487,6 +491,7 @@ static void ccif_smc_queries(void)
 
 /* ---- phase workers -------------------------------------------------- */
 
+static void ccif_lock_md_clock(void);
 static int ccif_phase_a(void)
 {
 	unsigned int sta1, sta3, prot1, prot0, emi0, clkmod;
@@ -620,7 +625,9 @@ static int ccif_phase_a(void)
 		infracfg_ao_map = NULL;
 		return -EACCES;
 	}
-	pr_info("CCI-CCIF: A: MD bus protections clear; attempting CCIF read\n");
+	pr_info("CCI-CCIF: A: MD bus protections clear; locking MD clocks\n");
+	ccif_lock_md_clock();
+	pr_info("CCI-CCIF: A: attempting CCIF read\n");
 
 	ccif_smc_queries();
 
