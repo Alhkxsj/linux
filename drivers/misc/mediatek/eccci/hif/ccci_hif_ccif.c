@@ -2082,6 +2082,20 @@ static void ccif_set_clk_on(unsigned char hif_id)
 		spin_unlock_irqrestore(&devapc_flag_lock, flags);
 	}
 
+	/*
+	 * qqcandy: every clk_ref above is NULL (our DTS has no clocks property),
+	 * so the loop body never runs and the vendor's devapc_check_flag would
+	 * stay 0 - and with it ccif_read32() returns 0 for everything and
+	 * ccif_write32() silently drops every write (HANDOFF §80.35). The gates
+	 * are open (ccif_raw_gates) and the MD bank is up, so declare the block
+	 * usable here instead. Pure flag write, no hardware access.
+	 */
+	spin_lock_irqsave(&devapc_flag_lock, flags);
+	devapc_check_flag = 1;
+	spin_unlock_irqrestore(&devapc_flag_lock, flags);
+	pr_info("CCI-CCIF: %s: devapc_check_flag=1 (raw-gate path)\n",
+		__func__);
+
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s end\n", __func__);
 }
 
@@ -2099,6 +2113,16 @@ static void ccif_set_clk_off(unsigned char hif_id)
 	unsigned long flags;
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s start\n", __func__);
+
+	/*
+	 * Mirror the vendor's in-loop devapc_check_flag = 0 here: with every
+	 * clk_ref NULL the loop below never runs, so without this the flag would
+	 * stay 1 while the gates are being closed - the exact combination that
+	 * wedged the bus before (HANDOFF §80.17).
+	 */
+	spin_lock_irqsave(&devapc_flag_lock, flags);
+	devapc_check_flag = 0;
+	spin_unlock_irqrestore(&devapc_flag_lock, flags);
 
 	if ((ccif_ctrl->plat_val.md_gen >= 6298) ||
 	    (ccif_ctrl->ccif_hw_reset_ver == 1)) {
