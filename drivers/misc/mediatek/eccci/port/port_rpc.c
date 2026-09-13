@@ -1139,6 +1139,33 @@ static void ccci_rpc_work_helper(struct port_t *port, struct rpc_pkt *pkt,
 			break;
 
 		}
+	case IPC_RPC_AMMS_DRDI_CONTROL:
+		/*
+		 * qqcandy: there is no ccci_rpcd userspace daemon here (same as
+		 * the pearl port), and MOLY asks for the DRDI tables right after
+		 * the runtime data. Answer it in the kernel instead of letting
+		 * the request hang: log what was asked and reply success so boot
+		 * continues. The tables themselves are preloaded elsewhere, via
+		 * SMEM_USER_MD_DRDI.
+		 */
+		CCCI_BOOTUP_LOG(md_id, RPC,
+			"AMMS_DRDI_CONTROL kernel fallback pkt_num=%d\n",
+			pkt_num);
+		{
+			int di;
+
+			for (di = 0; di < pkt_num; di++)
+				CCCI_BOOTUP_LOG(md_id, RPC,
+					"DRDI pkt[%d] len=%u first=0x%x\n", di,
+					pkt[di].len,
+					pkt[di].len >= sizeof(u32) ?
+					*((u32 *)pkt[di].buf) : 0);
+		}
+		tmp_data[0] = 0;
+		pkt_num = 0;
+		pkt[pkt_num].len = sizeof(unsigned int);
+		pkt[pkt_num++].buf = (void *)&tmp_data[0];
+		break;
 	case IPC_RPC_IT_OP:
 		{
 			int i;
@@ -1448,8 +1475,12 @@ int port_rpc_recv_match(struct port_t *port, struct sk_buff *skb)
 
 		case IPC_RPC_QUERY_AP_SYS_PROPERTY:
 		case IPC_RPC_SAR_TABLE_IDX_QUERY_OP:
-		case IPC_RPC_AMMS_DRDI_CONTROL:
 			is_userspace_msg = 1;
+			break;
+		case IPC_RPC_AMMS_DRDI_CONTROL:
+			/* qqcandy: no ccci_rpcd daemon here, so keep DRDI
+			 * requests in the kernel handler (see its case). */
+			is_userspace_msg = 0;
 			break;
 		default:
 			is_userspace_msg = 0;
