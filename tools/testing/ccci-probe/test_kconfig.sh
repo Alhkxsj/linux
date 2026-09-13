@@ -21,7 +21,7 @@ for modules in y n; do
 		for embedded in y n; do
 			for util in y m n; do
 				for request in y m n; do
-					printf 'CONFIG_MODULES=%s\nCONFIG_ARCH_MEDIATEK=%s\nCONFIG_MTK_EMBED_BOARD_DTB=%s\nCONFIG_MTK_CCCI_UTIL=%s\nCONFIG_MTK_CCCI_PROBE_MODULE=%s\nCONFIG_MTK_CCCI_SMEM_DUMP=%s\nCONFIG_MTK_CCCI_CCIF=%s\n' \
+					printf 'CONFIG_MODULES=%s\nCONFIG_ARCH_MEDIATEK=%s\nCONFIG_MTK_EMBED_BOARD_DTB=%s\nCONFIG_MTK_CCCI_UTIL=%s\nCONFIG_MTK_CCCI_PROBE_MODULE=%s\nCONFIG_MTK_CCCI_SMEM_DUMP=%s\nCONFIG_MTK_CCI_DIAG=%s\n' \
 						"$modules" "$mediatek" "$embedded" "$util" "$request" "$request" "$request" > config
 					srctree="$root" KCONFIG_CONFIG="$tmp/config" \
 						"$conf" --olddefconfig \
@@ -31,7 +31,7 @@ for modules in y n; do
 					   [ "$util" != n ] && [ "$request" != n ]; then
 						expected=m
 					fi
-					for sym in CONFIG_MTK_CCCI_PROBE_MODULE CONFIG_MTK_CCCI_SMEM_DUMP CONFIG_MTK_CCCI_CCIF; do
+					for sym in CONFIG_MTK_CCCI_PROBE_MODULE CONFIG_MTK_CCCI_SMEM_DUMP CONFIG_MTK_CCI_DIAG; do
 						actual=$(sed -n "s/^$sym=//p" config)
 						actual=${actual:-n}
 						if [ "$actual" != "$expected" ]; then
