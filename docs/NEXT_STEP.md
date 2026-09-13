@@ -1,183 +1,98 @@
-# NEXT STEP - CCCI 核心驱动集成
+# NEXT STEP — CCCI/基带:执行手册(2026-09-13 晚)
 
-**最后更新**：2026-09-13 03:38  
-**工作目录**：`/home/furruka/文档/项目/Kernel/6.18/`
-
----
-
-## 当前状态
-
-### ✅ 已完成
-- **Tag 读取验证**（§80.12）：27 个 tag 在真实设备上解析成功
-- **内存布局提取**：SMEM (0x8e000000, 1.1MB) + CCB (0x89000000, 64MB)
-- **探针模块稳定**：加载/卸载路径验证通过，无内存泄漏
-
-### 📍 当前位置
-- HEAD: `544c54b39e9b` (CCCI util 提交)
-- 设备运行内核: build #492 (`6.18.0-g544c54b39e9b-dirty`)
-- 日志已归档: `logs/ccci_probe_success_20260913_033408.log`
+**工作目录**:`/home/furruka/文档/项目/Kernel/6.18/`
+**权威细节**:`HANDOFF.md` **§80.42(执行手册)** ← 真源;本文件是它的精简版与索引入口。
 
 ---
 
-## Phase 1.1: 提取 tag 解析逻辑（当前任务）
+## 一句话
 
-### 目标
-将探针中的 tag 解析器提取为共用库，供 CCCI 核心驱动使用。
-
-### 操作清单
-
-#### 1. 创建共用解析器
-- [ ] 创建 `drivers/misc/mediatek/ccci_util/ccci_tag_parse.h`
-  - 导出 `ccci_tag_hdr`、`ccci_smem_layout` 结构
-  - 声明 `parse_tag_chain()` 函数接口
-  
-- [ ] 创建 `drivers/misc/mediatek/ccci_util/ccci_tag_parse.c`
-  - 从 `ccci_util_tag_probe.c` 提取核心解析逻辑
-  - 保留边界检查与循环检测
-  - 添加 EXPORT_SYMBOL_GPL
-
-#### 2. 重构探针模块
-- [ ] 修改 `ccci_util_tag_probe.c`
-  - 包含 `ccci_tag_parse.h`
-  - 移除重复的结构定义
-  - 调用共用解析函数
-  - 保持 sysfs 接口不变
-
-#### 3. 更新 Kconfig/Makefile
-- [ ] `drivers/misc/mediatek/ccci_util/Kconfig`
-  - 添加 `CCCI_TAG_PARSE` 选项
-  - 设为 `CCCI_UTIL_TAG_PROBE` 的依赖
-  
-- [ ] `drivers/misc/mediatek/ccci_util/Makefile`
-  - 添加 `ccci_tag_parse.o` 到构建规则
-
-#### 4. 验证
-- [ ] 主机测试：`make -C test_ccci_tag clean && make -C test_ccci_tag test`
-  - 100 项基础测试通过
-  - 5 万次变异测试通过
-  
-- [ ] 设备测试：
-  - 重新编译探针模块
-  - 推送至设备并加载
-  - 验证 tag 读取结果与 §80.12 一致
+`ccci_util` 的 LK 信息解析**从不运行**(已修,见 §80.33)与 **CCIF 访问门恒 0**(已修,§80.35)两个真缺陷
+已解决;**HS1 的根因由 pearl 指名并已在本树修好**(§80.41:CCIF SRAM 的 "smem info tail" 必须
+**同时写 baseA 与 baseB**,否则基带早停 `boot_status 0x5443000C/0x53320000` = "TC"/"S2")。
+**修复在 `ccci_ccif.ko` 里,已构建、vermagic 与设备逐字一致 ⇒ 设备回来后第一步就是验它。**
 
 ---
 
-## Phase 1.2: CCCI 核心框架（下一步）
+## 0. 前置检查(设备)
 
-### 准备工作
-- [ ] 克隆官方 5.10 仓库到本地：
-  ```bash
-  git clone --depth 1 --branch oneplus/mt6895_v_15.0.0_ace_race \
-    https://github.com/OnePlusOSS/android_kernel_5.10_oneplus_mt6895.git \
-    ~/kernel_5.10_mt6895_ref
-  ```
+```sh
+# 本机 IP 与密码**不进 git**（docs/ 是公开仓库的一部分）：见本地私有 HANDOFF.md 第 1 节。
+IP=<看 HANDOFF.md>; PW=<看 HANDOFF.md>
+SSH="sshpass -p $PW ssh -o StrictHostKeyChecking=no root@$IP"
+$SSH 'uname -r; uptime; cat /proc/modules | wc -l'
+```
+期望:`6.18.0-g5d55376a6791-dirty`、`uptime` 接近 0、模块数 **0**。
+(上一次会话结束时设备停在没走完的 reboot 里,需用户先重启。)
 
-### 核心任务
-- [ ] 创建 CCCI 核心目录结构：
-  ```
-  drivers/misc/mediatek/ccci/
-  ├── ccci_core.c       # 主驱动
-  ├── ccci_core.h       # 内部头文件
-  ├── ccci_platform.c   # 平台相关
-  ├── Kconfig
-  └── Makefile
-  ```
+## 1. 部署(主机)
 
-- [ ] 实现设备树绑定：
-  - Compatible string: `mediatek,mt6895-ccci`
-  - 解析 DT 资源（寄存器、中断、内存区域）
-  
-- [ ] 实现 probe 函数：
-  - 调用 `parse_tag_chain()` 获取布局
-  - 初始化 SMEM 映射
-  - 初始化 CCB 队列结构
-  - 创建字符设备节点
+```sh
+cd /home/furruka/文档/项目/Kernel/6.18
+SCP="sshpass -p $PW scp -o StrictHostKeyChecking=no"
+$SCP drivers/misc/mediatek/eccci/ccci_{auxadc,md_clk,rtc,md_all,fsm_scp,ccif}.ko root@$IP:/root/
+$SCP flash/tools/hs1_test.sh root@$IP:/root/
+```
+**部署前必须** `modinfo -F vermagic <ko>` 复核 = `6.18.0-g5d55376a6791-dirty`
+(§80.39:之前那条"LOCALVERSION 钉定"的说法是错的,AUTO=y 时 git 后缀总会追加)。
 
----
+主机 md5 前 12 位对照:
 
-## Phase 1.3: 基带启动（后续）
+| 模块 | md5 | 含什么 |
+|---|---|---|
+| `ccci_ccif.ko` | `e90a12e56d2f` | flag 修复 + **baseB 尾字修复(HS1 关键)** |
+| `ccci_md_all.ko` | `f44b2a01155a` | §80.33 布局 WA + RPC 内核回退 |
+| `ccci_fsm_scp.ko` | `d41629205ee9` | — |
+| `ccci_rtc.ko` | `8b14a1bbe253` | — |
+| `ccci_md_clk.ko` | `d4dc7a286e49` | — |
+| `ccci_auxadc.ko` | `dd5fe9f0d8d6` | — |
 
-### 参考路径
-参考官方 5.10 分支中的以下文件：
-- `drivers/misc/mediatek/ccci/ccci_md_all.c` - MD 生命周期
-- `drivers/misc/mediatek/ccci/ccci_modem.c` - MD 电源管理
-- `drivers/misc/mediatek/ccci/ccci_fsm.c` - 状态机
+## 2. 执行(一条命令)
 
-### 关键步骤
-- [ ] 实现 MD 电源控制接口
-- [ ] 实现 MD 复位序列
-- [ ] 实现启动握手协议
-- [ ] 验证基带启动（观察 dmesg 基带日志）
+```sh
+$SSH 'sh /root/hs1_test.sh; echo RC=$?'   # $IP/$PW 同前
+```
+脚本内:**单脚本完成全部步骤**(加载 → 点火 → 采集),日志用
+`systemd-run --unit=ccciloghs1 --collect` 起;`mdinit.py` 后台常驻(它必须**一直持有**
+`/dev/ccci_monitor`,关闭会触发 `force_md_stop`)。
 
----
+## 3. HS1 判据(全中才算过)
 
-## 约束与原则
+- `/proc/interrupts`:`CCIF_AP_DATA0`(hwirq 273)、`CCIF_AP_DATA1`(hwirq 274)**计数非 0**
+  (注意本 SoC 的 virq ≠ SPI+32,别用加 32 推 virq);
+- `/root/ccci_dump_hs1.txt` 出现 **"MD_QUERY_MSG"** 与 **"send runtime data"**;
+- dmesg 不再出现 `MD_BOOT_HS1_FAIL`;`md_boot_stats0/1` 不再是 `5443000C/53320000`。
 
-### 禁止
-- ❌ 参考 6.12 内核代码
-- ❌ 改变探针已验证的接口
-- ❌ 破坏现有 tag 读取路径
-- ❌ 引入未在设备上验证的内存访问
+## 4. 分支
 
-### 必须
-- ✅ 每次修改后运行主机测试
-- ✅ 关键节点在设备上验证
-- ✅ 保持最小 diff
-- ✅ 每个 Phase 完成后提交
+- **到了 HS1** ⇒ 与 pearl 持平。HS2 线的 RPC 内核回退已就位;接着看 `/proc/ccci_dump` 里
+  DRDI 请求/回包与 `hs2_got/hs2_done`。MOLY 之后会要 `MD1_SIM1/SIM2_HOT_PLUG_EINT`(节点定义
+  见 §80.41 附注,⚠ vendor-compatible 要先确认 eint/irq_domain 接得上)与 DRDI 表
+  (写 `SMEM_USER_MD_DRDI`)——这些归刷机包。
+- **仍停 TC/S2** ⇒ 读 **MD 侧**窗口 CHDATA 尾字确认 `0x7274626E` 是否写进 baseB;
+  确认 `ccci_reset_ccif_hw` 走到且 `devapc_check_flag=1`;若都成立 ⇒ 转 §80.39 源时钟线
+  (`MD_SRCCLKENA` 只读、ATF 时钟请求 -15,**只能刷机/用户在场**)。
 
----
+## 5. 刷机包(等用户点头;全部有据)
 
-## 决策待确认
+1. **`ccci_util` 两处**(已在树里、已编译):LKINFO stash fallback + 删 `ccci_util_probe` 门
+   ⇒ 官方 LK 解析跑起来;静态确认无内置代码依赖其符号,可安全内置。
+2. (可选)DT 补 `ccci,modem_info_v2`;ccifdriver 补 6 条 `clocks` + `clk-mt6895-bus.c`;
+   §80.41 附注的两个 EINT 节点与 `md_attr_node`(**`md_drdi_rf_set_idx` 我们 = 0x80**)。
+3. 纪律:**单槽刷**、DTB 内嵌于 Image ⇒ `build dtbs THEN Image.gz`、刷前比对内嵌 DTB 字节。
 
-在开始 Phase 1.1 之前需要用户确认：
+## 6. 硬约束(高于一切,违反 = 设备死到用户回来)
 
-1. **Git 管理**：是否先提交当前工作？
-   - 当前状态：本地领先 1 个提交 + 3 处 stash
-   - 建议：先提交探针验证成功的状态，清理 stash
+1. 不碰未证实可读的地址/寄存器。**已证实会卡**:MD bank0 `0xD0000000`、MD 域未上电时的
+   CCIF `0x1020xxxx`、DEVAPC 实例 `0x1000e000` 等、单独调 `MD_CLOCK_REQUEST` SMC。
+2. **不在"eccci 模块已加载 + MD 域已掉电"的状态下 reboot**(停止路径会碰 CCIF ⇒ 卡关机)。
+3. 只允许:读 SMEM(`0x8e000000`)/CCB(`0x89000000`)/tag(`0xbdbf0000`)、infra_ao 读、
+   insmod/rmmod 已证实可卸载的模块。
+4. 设备端一律单脚本;SSH 中途命令会被会话/复位杀掉。
 
-2. **CCCI 构建方式**：模块 vs builtin？
-   - 模块：独立开发，易于调试，可热加载
-   - Builtin：启动早期可用，避免 vermagic 问题
-   - 建议：初期用模块，稳定后改为 builtin
+## 7. 索引
 
-3. **参考仓库**：是否克隆到本地？
-   - 优点：离线访问，快速查找
-   - 大小：约 1.2GB
-   - 建议：克隆到 `~/kernel_5.10_mt6895_ref/`
-
----
-
-## 验收标准
-
-### Phase 1.1 完成标志
-- ✅ 共用解析器代码独立且可复用
-- ✅ 探针模块仍能在设备上正常工作
-- ✅ 主机测试全部通过
-- ✅ 设备测试结果与 §80.12 完全一致
-- ✅ Git 提交信息清晰，可回滚
-
-### Phase 1.2 完成标志
-- ✅ CCCI 核心模块能加载
-- ✅ 能从 DT 正确解析资源
-- ✅ 能成功调用 tag 解析器
-- ✅ SMEM 映射成功，地址可验证
-- ✅ 字符设备节点创建成功
-
----
-
-## 风险管理
-
-### 高风险操作
-- 修改共享内存映射方式
-- 改变 tag 解析逻辑的核心算法
-- 引入新的内核 API 调用（需验证 6.18 支持）
-
-### 回退方案
-- 探针模块保持独立，不受 CCCI core 影响
-- 每个 Phase 打 git tag: `ccci-phase-1.1`, `ccci-phase-1.2` 等
-- 关键文件保留 `.orig` 备份
-
----
-
-**等待用户指令开始 Phase 1.1。**
+- HANDOFF:§80.33(真缺陷 1)、§80.35(真缺陷 2:CCIF 观测曾是假 0)、§80.36/§80.39(两条"AP 侧
+  无安全杠杆"的结论)、**§80.41(HS1 根因 + 已修)**、**§80.42(执行手册)**。
+- 记忆:`~/.zcode/cli/memories/projects/6.18-627358bfbb5c1ee5/ccci-roadmap-status.md`。
+- 主机测试:`cd tools/testing/ccci-probe && make test`(ringbuf 21 项 + 72 组合矩阵,全绿)。
