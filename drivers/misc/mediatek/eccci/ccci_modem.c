@@ -384,6 +384,45 @@ static inline int update_smem_region(struct ccci_smem_region *region)
 	return ret;
 }
 
+/*
+ * WORKAROUND (qqcandy, HANDOFF §80.33) - remove once the real fix lands.
+ *
+ * The vendor ccci_util LK-info parse never runs on this port: our embedded DTS
+ * carries no "ccci,modem_info_v2" (LK puts it in its own FDT, which our
+ * embedded DTB replaces) and ccci_util_fo_init() sits behind the
+ * ccci_util_probe gate. Every get_md_resv_*() getter therefore returns zero
+ * and the driver builds its whole SMEM/CCB view on physical 0 - visible in
+ * /proc/ccci_dump as "smem info: (0 40000000 0 0)" and
+ * "ccb totoal :offset = 0x0, size = 0x0", with init_smem_regions mapping
+ * offsets 0x0/0x4000/0x29000 straight off address 0. A zero-sized CCB is
+ * fatal: the modem has no cross-core buffer and can never send HS1.
+ *
+ * The constants below are what LK's tags carry on this device (md_bank0_base,
+ * md_mem_layout, md1_bank4_cache_info, md1_smem_cahce_offset, ccb_info). Every
+ * override fires only while the official value is zero, so fixing the DT
+ * property + parse gate turns all of them into no-ops.
+ */
+#define QQCANDY_MD_BANK0_BASE		0xd0000000
+#define QQCANDY_MD_BANK0_SIZE		0x024b0000
+#define QQCANDY_MD_SMEM_BASE		0x8e000000
+#define QQCANDY_MD_SMEM_SIZE		0x00120000
+#define QQCANDY_MD_CSMEM_BASE		0x88000000
+#define QQCANDY_MD_CSMEM_SIZE		0x05060000
+#define QQCANDY_MD_SMEM_CACHE_OFFSET	0x08000000
+#define QQCANDY_MD_CCB_OFFSET		0x01000000
+#define QQCANDY_MD_CCB_SIZE		0x04000000
+
+static bool qqcandy_md_layout_wa_logged;
+
+static unsigned int qqcandy_md_cache_offset(void)
+{
+	unsigned int off = get_md_smem_cachable_offset(MD_SYS1);
+
+	if (off)
+		return off;
+	return QQCANDY_MD_SMEM_CACHE_OFFSET;
+}
+
 static void ccci_6297_md_smem_layout_config(struct ccci_modem *md)
 {
 	struct ccci_mem_layout *mm_str = &md->mem_layout;
@@ -429,9 +468,17 @@ static void ccci_6297_md_smem_layout_config(struct ccci_modem *md)
 	get_md_resv_csmem_info(md->index,
 		&mm_str->md_bank4_cacheable_total.base_ap_view_phy,
 		&mm_str->md_bank4_cacheable_total.size);
+	if (mm_str->md_bank4_cacheable_total.base_ap_view_phy == 0) {
+		/* WA §80.33: c_smem is 0x88000000+0x5060000 (LK tag) */
+		mm_str->md_bank4_cacheable_total.base_ap_view_phy =
+			QQCANDY_MD_CSMEM_BASE;
+		mm_str->md_bank4_cacheable_total.size = QQCANDY_MD_CSMEM_SIZE;
+		pr_info("%s: WORKAROUND §80.33: c_smem base=0x%x size=0x%x\n",
+			__func__, QQCANDY_MD_CSMEM_BASE, QQCANDY_MD_CSMEM_SIZE);
+	}
 	/* cacheable start */
 	mm_str->md_bank4_cacheable_total.base_md_view_phy = 0x40000000
-		+ get_md_smem_cachable_offset(MD_SYS1)
+		+ qqcandy_md_cache_offset()
 		+ mm_str->md_bank4_cacheable_total.base_ap_view_phy -
 		round_down(mm_str->md_bank4_cacheable_total.base_ap_view_phy,
 			0x00100000);
@@ -441,6 +488,14 @@ static void ccci_6297_md_smem_layout_config(struct ccci_modem *md)
 	get_md_cache_region_info(SMEM_USER_CCB_START,
 				&ccb_offset,
 				&ccb_size);
+	if (ccb_size == 0) {
+		/* WA §80.33: ccb_info tag = 0x89000000+0x4000000, i.e.
+		 * offset 0x1000000 inside c_smem */
+		ccb_offset = QQCANDY_MD_CCB_OFFSET;
+		ccb_size = QQCANDY_MD_CCB_SIZE;
+		pr_info("%s: WORKAROUND §80.33: ccb offset=0x%x size=0x%x\n",
+			__func__, ccb_offset, ccb_size);
+	}
 	CCCI_BOOTUP_LOG(md->index, TAG,
 			"ccb totoal :offset = 0x%x, size = 0x%x\n",
 			ccb_offset, ccb_size);
@@ -705,6 +760,20 @@ void ccci_md_config(struct ccci_modem *md)
 	/* Get memory info */
 	get_md_resv_mem_info(md->index, &md_resv_mem_addr,
 		&md_resv_mem_size, &md_resv_smem_addr, &md_resv_smem_size);
+	if (md_resv_mem_addr == 0 && !qqcandy_md_layout_wa_logged) {
+		/* WA §80.33: bank0 = 0xd0000000+0x24b0000, nc_smem =
+		 * 0x8e000000+0x120000 (LK tags md_bank0_base/md_mem_layout) */
+		md_resv_mem_addr = QQCANDY_MD_BANK0_BASE;
+		md_resv_mem_size = QQCANDY_MD_BANK0_SIZE;
+		md_resv_smem_addr = QQCANDY_MD_SMEM_BASE;
+		md_resv_smem_size = QQCANDY_MD_SMEM_SIZE;
+		qqcandy_md_layout_wa_logged = true;
+		pr_info("%s: WORKAROUND §80.33: bank0=0x%llx/0x%x smem=0x%llx/0x%x\n",
+			__func__, (unsigned long long)md_resv_mem_addr,
+			md_resv_mem_size,
+			(unsigned long long)md_resv_smem_addr,
+			md_resv_smem_size);
+	}
 	get_md1_md3_resv_smem_info(md->index, &md1_md3_smem_phy,
 		&md1_md3_smem_size);
 	/* setup memory layout */
