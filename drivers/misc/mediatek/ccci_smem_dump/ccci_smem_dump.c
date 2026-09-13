@@ -46,6 +46,69 @@
 #define CCCI_CCB_BASE		0x0000000089000000ULL
 #define CCCI_CCB_MAX_SIZE	0x04000000U
 
+/*
+ * The modem image bank. The LK tag md_bank0_base names the AP-side base of
+ * the MD's bank0 and region 0 of md_mem_layout is the 38.4 MB md1rom entry,
+ * so the first megabyte of DRAM there is either the firmware LK loaded or
+ * nothing at all.
+ *
+ * WARNING: reading it from the AP is NOT possible on this SoC. With the MD
+ * power domain off, the first access raises "Unable to handle kernel ttbr
+ * address size fault" (ESR 0x96000000) even though dump_pagetable shows a
+ * valid AF=1 PTE mapping exactly PA 0xD0000000 - the md_mem_usage regions are
+ * hardware-protected against the AP. The Oops kills the workqueue worker, the
+ * module is then stuck in RUNNING (rmmod hangs) and the box needs a reset.
+ * Hence the stage is opt-in and off by default; it is kept only as a probe
+ * for a future (MD-domain-up) attempt with the user present.
+ */
+#define CCCI_MDIMG_BASE		0x00000000d0000000ULL
+#define CCCI_MDIMG_MAP_SIZE	0x00100000U
+
+static bool ccci_smem_dump_mdimg_read;
+module_param_named(mdimg_read, ccci_smem_dump_mdimg_read, bool, 0600);
+MODULE_PARM_DESC(mdimg_read,
+		 "DANGEROUS: also read MD bank0 at 0xd0000000; faults the AP today (see HANDOFF §80.32)");
+
+/*
+ * Optional and off by default: deassert the MD power domain's AXI bus
+ * protection entries (the scpsys bp_table, IFR_TYPE, in infracfg).
+ *
+ * The eccci driver programs the CCIF entirely from its probe - the clock
+ * gates, the SRAM clear and the magic/MDSS-address publish in
+ * ccci_reset_ccif_hw() - which on this port happens with the MD domain still
+ * off, because nothing holds it on the way LK does on stock. With the
+ * protection asserted every AP-side CCIF access is dropped silently (reads
+ * come back 0, writes never land), which is exactly what the device shows.
+ * Writing the clr registers is the same set/clr register class already used
+ * and verified for the CCIF clock gates, and the domain is held on by the
+ * mddriver probe at that point, so there is no traffic to a dead domain.
+ */
+static bool ccci_smem_dump_bp_clear;
+module_param_named(bp_clear, ccci_smem_dump_bp_clear, bool, 0600);
+MODULE_PARM_DESC(bp_clear,
+		 "deassert the MD-domain AXI bus protection at load (see HANDOFF §80.36)");
+
+static void ccci_smem_dump_bp_clear_run(void)
+{
+	void *ao = ioremap(0x0000000010001000ULL, 0x1000);
+
+	if (!ao) {
+		pr_info("CCCI-SMEM: bp_clear: infra_ao ioremap failed\n");
+		return;
+	}
+	pr_info("CCCI-SMEM: bp_clear: before 0xc4c=0x%08x 0xc5c=0x%08x 0xc6c=0x%08x\n",
+		readl(ao + 0x0c4c), readl(ao + 0x0c5c), readl(ao + 0x0c6c));
+	writel(BIT(28), ao + 0x0c48);		/* INFRASYS0_MD */
+	mb();
+	writel(BIT(9), ao + 0x0c58);		/* INFRASYS1_MD */
+	mb();
+	writel(BIT(16) | BIT(17), ao + 0x0c68);	/* EMISYS0_MD */
+	mb();
+	pr_info("CCCI-SMEM: bp_clear: after  0xc4c=0x%08x 0xc5c=0x%08x 0xc6c=0x%08x\n",
+		readl(ao + 0x0c4c), readl(ao + 0x0c5c), readl(ao + 0x0c6c));
+	iounmap(ao);
+}
+
 #define CCCI_NC_NODE_MAX	64u
 #define CCCI_OV_MAX		16u
 #define CCCI_CSMEM_MAX		16u
@@ -319,6 +382,7 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 	struct ccci_smem_csmem_item csmem_info = {};
 	unsigned int ov_num, lk_num, csmem_num = 0;
 	size_t smem_size = 0, ccb_size = 0;
+	unsigned long long md_bank0 = 0;
 	void *tag_map, *smem_map = NULL, *ccb_map = NULL;
 	unsigned int i;
 	int ret;
@@ -376,10 +440,8 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 		}
 	}
 	if (tc.md_bank0_base.data && tc.md_bank0_base.size >= 8) {
-		unsigned long long b0;
-
-		memcpy(&b0, tc.md_bank0_base.data, 8);
-		pr_info("CCCI-SMEM: md_bank0_base=0x%llx\n", b0);
+		memcpy(&md_bank0, tc.md_bank0_base.data, 8);
+		pr_info("CCCI-SMEM: md_bank0_base=0x%llx\n", md_bank0);
 	}
 
 	/* LK's own full region table (raw, uninterpreted), streamed from the
@@ -576,6 +638,138 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 			res.ccb.addr, res.ccb.size);
 	}
 
+	/* ---- MD bank0: did LK actually populate the modem image? ----
+	 * Read-only DRAM: no MMIO, no clocks, no SMC. The window is hashed so
+	 * the host can compare it against the OTA md1img without shipping the
+	 * megabyte itself.
+	 */
+	if (md_bank0 != CCCI_MDIMG_BASE || !ccci_smem_dump_mdimg_read) {
+		pr_info("CCCI-SMEM: step 5 skipped: md_bank0_base=0x%llx mdimg_read=%d\n",
+			md_bank0, ccci_smem_dump_mdimg_read);
+	} else {
+		void *img;
+
+		pr_info("CCCI-SMEM: step 5: map MD bank0 pa=0x%llx size=0x%x WB (read-only)\n",
+			md_bank0, CCCI_MDIMG_MAP_SIZE);
+		img = memremap(md_bank0, CCCI_MDIMG_MAP_SIZE, MEMREMAP_WB);
+		if (!img) {
+			pr_info("CCCI-SMEM: bank0 memremap failed; skipping\n");
+		} else {
+			const u32 *wr = img;
+			size_t words = CCCI_MDIMG_MAP_SIZE / sizeof(u32);
+			u64 fnv = 0xcbf29ce484222325ULL;
+			unsigned long long zero = 0;
+			size_t k;
+
+			for (k = 0; k < words; k++) {
+				u32 v = wr[k];
+				int shift;
+
+				if (!v)
+					zero++;
+				for (shift = 0; shift < 32; shift += 8)
+					fnv = (fnv ^ ((v >> shift) & 0xff)) *
+					      0x100000001b3ULL;
+			}
+			pr_info("CCCI-SMEM: MDIMG pa=0x%llx window=0x%x zero_words=%llu/%zu fnv1a=0x%llx\n",
+				md_bank0, CCCI_MDIMG_MAP_SIZE, zero, words, fnv);
+			ccci_smem_dump_hex32(img, CCCI_MDIMG_MAP_SIZE, 0, 16,
+					     "MDIMG");
+			ccci_smem_dump_hex32(img, CCCI_MDIMG_MAP_SIZE, 0x1e0, 16,
+					     "MDIMG");
+			ccci_smem_dump_hex32(img, CCCI_MDIMG_MAP_SIZE, 0x380, 16,
+					     "MDIMG");
+			memunmap(img);
+		}
+	}
+
+	/* ---- infra_ao: CCIF gate / reset / power state (read-only) ----
+	 * The HF 0x10001000 block is always-on and reading it is independent of
+	 * the MD domain (ccci_diag proved that before). Needed because on the
+	 * device the AP's writes into the CCIF SRAM do not stick while the CCIF
+	 * registers read back as 0 - consistent with the block still being held
+	 * in reset / not enabled, see HANDOFF §80.34.
+	 */
+	{
+		static const struct {
+			unsigned int off;
+			const char *name;
+		} ao_regs[] = {
+			{ 0x088, "IFRAO1_SET" },
+			{ 0x08c, "IFRAO1_CLR" },
+			{ 0x094, "IFRAO1_STA" },
+			{ 0x0c0, "IFRAO3_SET" },
+			{ 0x0c4, "IFRAO3_CLR" },
+			{ 0x0c8, "IFRAO3_STA" },
+			{ 0x150, "CCIF_RST_SET" },
+			{ 0x154, "CCIF_RST_CLR" },
+			{ 0xbf0, "CCIF_PWR_BF0" },
+			{ 0xf0c, "MD_SRCCLKENA" },
+			{ 0xf50, "RST_VER1_SET" },
+			{ 0xf54, "RST_VER1_CLR" },
+			/* MD-domain AXI bus protection (scpsys bp_table,
+			 * IFR_TYPE): sta bits SET = the AP cannot reach the
+			 * MD domain, which is exactly how an inert CCIF looks
+			 * (reads 0, writes dropped). */
+			{ 0xc4c, "BP_INFRASYS0_STA" },
+			{ 0xc5c, "BP_INFRASYS1_STA" },
+			{ 0xc6c, "BP_EMISYS0_STA" },
+			{ 0xc48, "BP_INFRASYS0_CLR" },
+			{ 0xc58, "BP_INFRASYS1_CLR" },
+			{ 0xc68, "BP_EMISYS0_CLR" },
+		};
+		void *ao = ioremap(0x0000000010001000ULL, 0x1000);
+		unsigned int r;
+
+		if (!ao) {
+			pr_info("CCCI-SMEM: infra_ao ioremap failed; skipped\n");
+		} else {
+			for (r = 0; r < ARRAY_SIZE(ao_regs); r++)
+				pr_info("CCCI-SMEM: INFRA_AO+0x%03x %-13s = 0x%08x\n",
+					ao_regs[r].off, ao_regs[r].name,
+					readl(ao + ao_regs[r].off));
+			iounmap(ao);
+		}
+	}
+
+	/* ---- DEVAPC instances: violation record (read-only) ----
+	 * Bases come from the stock FDT (always-on infra blocks). If a DEVAPC
+	 * rule denies the AP access to the CCIF, the hardware behaves exactly
+	 * like the CCIF does today - reads return the default 0, writes are
+	 * dropped - and it records the offending address in VIO_DBG*. Offsets
+	 * per devapc-mt6895.h: mask 0x000, sta 0x400, dbg 0x900/904/908/90C,
+	 * apc_con 0xF00.
+	 */
+	{
+		static const struct {
+			unsigned int base;
+			const char *name;
+		} dapc[] = {
+			{ 0x1000e000, "ao_infra_peri0" },
+			{ 0x10015000, "mpu_ao" },
+			{ 0x10019000, "ao_md" },
+			{ 0x1001c000, "ao_mm" },
+			{ 0x10022000, "ao_infra_peri1" },
+		};
+		unsigned int d;
+
+		for (d = 0; d < ARRAY_SIZE(dapc); d++) {
+			void *base = ioremap(dapc[d].base, 0x1000);
+
+			if (!base) {
+				pr_info("CCCI-SMEM: DEVAPC %s ioremap failed\n",
+					dapc[d].name);
+				continue;
+			}
+			pr_info("CCCI-SMEM: DEVAPC %-14s sta=0x%08x apc_con=0x%08x dbg=%08x %08x %08x %08x\n",
+				dapc[d].name, readl(base + 0x400),
+				readl(base + 0xf00), readl(base + 0x900),
+				readl(base + 0x904), readl(base + 0x908),
+				readl(base + 0x90c));
+			iounmap(base);
+		}
+	}
+
 	ret = 0;
 	pr_info("CCCI-SMEM: complete: read-only dump done, nothing written\n");
 
@@ -699,6 +893,8 @@ static int __init ccci_smem_dump_init(void)
 	ccci_smem_dump_state = CCCI_SMEM_DUMP_READY;
 	ccci_smem_dump_last_result = -ENODATA;
 	mutex_unlock(&ccci_smem_dump_lock);
+	if (ccci_smem_dump_bp_clear)
+		ccci_smem_dump_bp_clear_run();
 	pr_info("CCCI-SMEM: ready; nothing mapped or read; runtime trigger required\n");
 	return 0;
 }
