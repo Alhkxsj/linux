@@ -72,6 +72,8 @@ struct ccci_smem_tag_ctx {
 	struct ccci_smem_tag_view csmem_layout;	/* md1_bank4_cache_layout */
 	struct ccci_smem_tag_view ccb_gear_id;	/* ccb_gear_id */
 	struct ccci_smem_tag_view cache_offset;	/* md1_smem_cahce_offset */
+	struct ccci_smem_tag_view md_mem_layout;	/* md_mem_layout */
+	struct ccci_smem_tag_view md_bank0_base;	/* md_bank0_base */
 };
 
 enum ccci_smem_dump_state {
@@ -199,6 +201,10 @@ static int ccci_smem_collect_tag(const struct ccci_tag *tag, unsigned int offset
 		view = &tc->ccb_gear_id;
 	else if (!strcmp(tag->tag_name, "md1_smem_cahce_offset"))
 		view = &tc->cache_offset;	/* sic, official tag name */
+	else if (!strcmp(tag->tag_name, "md_mem_layout"))
+		view = &tc->md_mem_layout;
+	else if (!strcmp(tag->tag_name, "md_bank0_base"))
+		view = &tc->md_bank0_base;
 
 	if (view) {
 		view->data = (const char *)tc->base + tag->data_offset;
@@ -354,6 +360,27 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 	if (res.ccb_found)
 		pr_info("CCCI-SMEM: ccb_info: addr=0x%llx size=0x%x\n",
 			res.ccb.addr, res.ccb.size);
+
+	/* LK's MD memory map: the key for translating modem PCs into image
+	 * offsets. Dump the raw payload. */
+	if (tc.md_mem_layout.data) {
+		unsigned int k;
+
+		pr_info("CCCI-SMEM: md_mem_layout payload (%u bytes):\n",
+			tc.md_mem_layout.size);
+		for (k = 0; k * 4 + 4 <= tc.md_mem_layout.size && k < 108; k++) {
+			unsigned int v;
+
+			memcpy(&v, (const char *)tc.md_mem_layout.data + k * 4, 4);
+			pr_info("CCCI-SMEM:   mm[%02u]=0x%08x\n", k, v);
+		}
+	}
+	if (tc.md_bank0_base.data && tc.md_bank0_base.size >= 8) {
+		unsigned long long b0;
+
+		memcpy(&b0, tc.md_bank0_base.data, 8);
+		pr_info("CCCI-SMEM: md_bank0_base=0x%llx\n", b0);
+	}
 
 	/* LK's own full region table (raw, uninterpreted), streamed from the
 	 * mapped tag payload to keep the work function's stack small.
