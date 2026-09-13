@@ -320,6 +320,7 @@ static int ccif_read_header(struct ccci_tag_hdr *hdr)
 static enum ccif_phase ccif_done = CCIF_PHASE_IDLE;
 static bool ccif_armed;
 static bool md_powered;
+static bool ccif_force;   /* override the md_powered check (domain held by another driver) */
 static struct platform_device *ccif_pdev;
 
 /*
@@ -337,7 +338,7 @@ static int ccif_request(bool live, bool on, enum ccif_phase need)
 		return -EAGAIN;
 	if (ccif_armed)
 		return -EALREADY;
-	if (!md_powered)
+	if (!md_powered && !ccif_force)
 		return -EPERM;
 	if (ccif_done != need)
 		return -EKEYREJECTED;
@@ -429,6 +430,13 @@ static const struct kernel_param_ops ccif_ops_d = {
 
 module_param_cb(ccif_boot, &ccif_ops_d, &trigger_d, 0600);
 MODULE_PARM_DESC(ccif_boot, "D: MD ignition - flight SMC, power cycle, CCIF reset, MD_KERNEL_BOOT_UP, HS1 poll (requires C, one shot)");
+
+static const struct kernel_param_ops ccif_force_ops = {
+	.get = param_get_bool,
+	.set = param_set_bool,
+};
+module_param_cb(ccif_force, &ccif_force_ops, &ccif_force, 0600);
+MODULE_PARM_DESC(ccif_force, "bypass the md_powered check when another driver holds the MD domain");
 
 /* ---- the IRQ handler: defensive, and unreachable while NO_AUTOEN --- */
 
@@ -631,16 +639,6 @@ static int ccif_phase_a(void)
 			readl(l2_map));
 		iounmap(l2_map);
 
-		if (!ap_read_allowed) {
-			pr_info("CCI-CCIF: A: MD_CCIF read gated off (ccif_ap_read=0; known hang class)\n");
-		} else {
-			pr_info("CCI-CCIF: A: reading MD_CCIF CON 0x1020a000\n");
-			md_ccif_map = ioremap(MD_CCIF_BASE, CCIF_BANK_SIZE);
-			if (!md_ccif_map)
-				return -ENOMEM;
-			pr_info("CCI-CCIF: A: MD_CCIF CON=0x%08x\n",
-				readl(md_ccif_map + APCCIF_CON));
-		}
 		pr_info("CCI-CCIF: A: reading AP_CCIF CON 0x10209000\n");
 	}
 
