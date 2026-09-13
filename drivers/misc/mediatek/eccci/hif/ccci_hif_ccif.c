@@ -1896,6 +1896,25 @@ void ccci_reset_ccif_hw(unsigned char md_id,
 	ccif_write32(baseA,
 		PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32),
 		region->size);
+	/*
+	 * qqcandy: the tail above goes to the AP-side view only, and the vendor
+	 * code can afford that because on stock LK pre-writes the MD side. Our
+	 * clear loop above zeroes BOTH views, so without these writes the MD's
+	 * own view stays all zero, the modem stalls at early boot (boot_status
+	 * 0x5443000C/0x53320000 = "TC"/"S2") and never sends HS1 - exactly what
+	 * this device shows. Same three values, written to the MD window.
+	 * (Cross-checked against the MT6895-Mainline pearl port, whose comment
+	 * and verified result report the same stall and the same fix.)
+	 */
+	ccif_write32(baseB,
+		PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32),
+		0x7274626E);
+	ccif_write32(baseB,
+		PCCIF_CHDATA + PCCIF_SRAM_SIZE - 2 * sizeof(u32),
+		region->base_md_view_phy);
+	ccif_write32(baseB,
+		PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32),
+		region->size);
 }
 EXPORT_SYMBOL(ccci_reset_ccif_hw);
 
