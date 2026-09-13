@@ -1,1 +1,3 @@
 /test_ccci_probe
+/test_ccci_smem
+/test_ccci_ringbuf
