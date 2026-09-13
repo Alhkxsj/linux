@@ -199,3 +199,8 @@ docs-local/
 
 # bench logs (contain device MACs/serial-ish data; never publish)
 logs/
+
+# host test binaries (build artefacts of tools/testing/ccci-probe)
+tools/testing/ccci-probe/test_ccci_probe
+tools/testing/ccci-probe/test_ccci_smem
+tools/testing/ccci-probe/test_ccci_ringbuf
