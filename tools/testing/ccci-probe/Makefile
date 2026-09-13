@@ -9,7 +9,7 @@ endif
 
 PARSER := ../../../drivers/misc/mediatek/ccci_probe/ccci_probe_parser.h
 LAYOUT := ../../../drivers/misc/mediatek/ccci_smem_dump/ccci_smem_layout.h
-RINGBUF := ../../../drivers/misc/mediatek/ccci_ccif/ccci_ccif_ringbuf.h
+RINGBUF := ../../../drivers/misc/mediatek/ccci_diag/ccci_ccif_ringbuf.h
 
 .PHONY: all test clean
 all: test_ccci_probe test_ccci_smem test_ccci_ringbuf

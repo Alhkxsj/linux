@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../../../drivers/misc/mediatek/ccci_ccif/ccci_ccif_ringbuf.h"
+#include "../../../drivers/misc/mediatek/ccci_diag/ccci_ccif_ringbuf.h"
 
 static unsigned char region[1024 * 1024];
 static size_t offsets[CCCI_CCIF_QUEUE_NUM];
