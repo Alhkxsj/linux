@@ -199,3 +199,9 @@ docs-local/
 
 # bench logs (contain device MACs/serial-ish data; never publish)
 logs/
+
+# stale local copies of early design/status docs (superseded; do not publish)
+docs/WORKFLOW.md
+docs/STATUS_phase1.1.md
+docs/PHASE_1.2_design.md
+docs/PHASE1.2_DESIGN.md
