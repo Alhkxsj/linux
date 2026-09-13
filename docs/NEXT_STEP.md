@@ -1,7 +1,10 @@
 # NEXT STEP — CCCI/基带:执行手册(2026-09-13 晚)
 
 **工作目录**:`/home/furruka/文档/项目/Kernel/6.18/`
-**权威细节**:`HANDOFF.md` **§80.42(执行手册)** ← 真源;本文件是它的精简版与索引入口。
+**权威细节**:`HANDOFF.md` ← 真源(只看它决定下一步);本文件是精简版。
+**私有文档树的标签**:文件名前缀 `[ACTIVE]` 才代表"要做/可依赖",其余 `[DONE]`/`[BLOCKED]`/
+`[SKIP]`/`[CANCEL]`/`[FAILED]`/`[DANGER]`/`[DEPRECATED]` **都不是欠账** ——
+见 `docs-local/handoff/00-INDEX.md`;细节章节见 `[ACTIVE] 80-42.md`。
 
 ---
 

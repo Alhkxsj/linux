@@ -7,10 +7,12 @@
 >
 > - **`HANDOFF.md`（仓库根，私有主文件）** —— 只看它决定下一步：现状 / 命令与判据 / 硬约束。
 > - **`docs-local/handoff/`** —— 从旧 HANDOFF（3217 行）拆出的大全：
->   - `00-INDEX.md` 索引（**先看这个**）：[Active] 可依赖 / [Completed] 历史但成立 /
->     [Deprecated] 已被更正、别引用；
->   - `sections/*.md` 每节一个小文件，首行带标签与"被谁更正"；
->   - `archive/HANDOFF-full-20260913-v80.42.md` 逐字旧档。
+>   - `00-INDEX.md` 索引（**先看这个**）：**只有 `[ACTIVE]` 表示"要做/可依赖"**；
+>     其余标签——`[DONE]` 已完成、`[BLOCKED]` 现在做不了、`[SKIP]` 有意不做、
+>     `[CANCEL]` 已放弃、`[FAILED]` 尝试失败、`[DANGER]` 会把设备搞死、`[DEPRECATED]`
+>     已被更正——**都不是欠账**；
+>   - `sections/` 每节一个小文件，**英文标签写在文件名最前面**，首行写"被谁更正/为什么不做"；
+>   - `archive/HANDOFF-full-20260913-v80.42.md` 逐字旧档（grep 它，不要通读）。
 
 ## 这份工作的当前状态（一句话版）
 
