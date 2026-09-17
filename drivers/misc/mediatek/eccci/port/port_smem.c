@@ -10,10 +10,10 @@
 #include <linux/module.h>
 #include <linux/timer.h>
 #include <linux/poll.h>
+#include <linux/sched/clock.h>
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 #include <linux/hrtimer.h>
-#include <linux/sched/clock.h>
 #endif
 
 #if IS_ENABLED(CONFIG_OF)
@@ -897,4 +897,3 @@ struct port_ops smem_port_ops = {
 #endif
 
 };
-
