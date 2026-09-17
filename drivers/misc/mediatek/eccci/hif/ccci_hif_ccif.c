@@ -45,10 +45,13 @@
 #endif
 
 #define TAG "cif"
+#define CCIF_EMPTY_IRQ_POLL_MS 20
 /* struct md_ccif_ctrl *ccif_ctrl; */
 
 unsigned int devapc_check_flag;
 spinlock_t devapc_flag_lock;
+static atomic_t ccif_data0_observe_count = ATOMIC_INIT(0);
+static atomic_t ccif_data1_observe_count = ATOMIC_INIT(0);
 
 int ccif_read32(void *b, unsigned long a)
 {
@@ -1369,13 +1372,10 @@ static void md_ccif_launch_work(struct md_ccif_ctrl *md_ctrl)
 	}
 }
 
-static irqreturn_t md_ccif_isr(int irq, void *data)
+static void md_ccif_process_data0(struct md_ccif_ctrl *md_ctrl,
+	unsigned int ch_id)
 {
-	struct md_ccif_ctrl *md_ctrl = (struct md_ccif_ctrl *)data;
-	unsigned int ch_id, i;
-	/*disable_irq_nosync(md_ctrl->ccif_irq_id); */
-	/*must ack first, otherwise IRQ will rush in */
-	ch_id = ccif_read32(md_ctrl->ccif_ap_base, APCCIF_RCHNUM);
+	unsigned int i;
 
 	for (i = 0; i < CCIF_CH_NUM; i++)
 		if (ch_id & 0x1 << i) {
@@ -1400,6 +1400,67 @@ static irqreturn_t md_ccif_isr(int irq, void *data)
 		md_ccif_launch_work(md_ctrl);
 	} else
 		md_ccif_handle_exception(md_ctrl);
+}
+
+static void md_ccif_data0_poll(struct work_struct *work)
+{
+	struct md_ccif_ctrl *md_ctrl = container_of(to_delayed_work(work),
+		struct md_ccif_ctrl, data0_poll_work);
+	unsigned int ch_id;
+
+	if (READ_ONCE(md_ctrl->ccif_state) != HIFCCIF_STATE_PWRON)
+		return;
+
+	ch_id = ccif_read32(md_ctrl->ccif_ap_base, APCCIF_RCHNUM);
+	if (!ch_id) {
+		md_ctrl->data0_empty_polls++;
+		if (md_ctrl->data0_empty_polls == 1 ||
+		    !(md_ctrl->data0_empty_polls % 50))
+			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG,
+				"WORKAROUND: DATA0 empty IRQ masked, poll=%u\n",
+				md_ctrl->data0_empty_polls);
+		mod_delayed_work(system_wq, &md_ctrl->data0_poll_work,
+			msecs_to_jiffies(CCIF_EMPTY_IRQ_POLL_MS));
+		return;
+	}
+
+	md_ccif_process_data0(md_ctrl, ch_id);
+	CCCI_NOTICE_LOG(md_ctrl->md_id, TAG,
+		"WORKAROUND: DATA0 polling recovered ch=0x%x after %u polls\n",
+		ch_id, md_ctrl->data0_empty_polls);
+	if (READ_ONCE(md_ctrl->ccif_state) == HIFCCIF_STATE_PWRON &&
+	    atomic_cmpxchg(&md_ctrl->data0_irq_masked, 1, 0) == 1)
+		enable_irq(md_ctrl->ap_ccif_irq0_id);
+}
+
+static irqreturn_t md_ccif_isr(int irq, void *data)
+{
+	struct md_ccif_ctrl *md_ctrl = (struct md_ccif_ctrl *)data;
+	unsigned int ch_id;
+	int observe_count = atomic_inc_return(&ccif_data0_observe_count);
+
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: CCIF_DATA0 entry n=%d irq=%d cpu=%u\n",
+			observe_count, irq, raw_smp_processor_id());
+	/* Must ack first, otherwise IRQ will rush in. */
+	ch_id = ccif_read32(md_ctrl->ccif_ap_base, APCCIF_RCHNUM);
+	if (!ch_id) {
+		if (atomic_cmpxchg(&md_ctrl->data0_irq_masked, 0, 1) == 0) {
+			md_ctrl->data0_empty_polls = 0;
+			disable_irq_nosync(irq);
+			mod_delayed_work(system_wq, &md_ctrl->data0_poll_work,
+				msecs_to_jiffies(CCIF_EMPTY_IRQ_POLL_MS));
+			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG,
+				"WORKAROUND: mask DATA0 IRQ with empty RCHNUM\n");
+		}
+		goto out;
+	}
+
+	md_ccif_process_data0(md_ctrl, ch_id);
+out:
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: CCIF_DATA0 exit n=%d irq=%d cpu=%u ch=0x%x\n",
+			observe_count, irq, raw_smp_processor_id(), ch_id);
 
 	return IRQ_HANDLED;
 }
@@ -1863,17 +1924,32 @@ void ccci_reset_ccif_hw(unsigned char md_id,
 		if (reset_bit == -1)
 			return;
 
-		/*
-		 *this reset bit will clear
-		 *CCIF's busy/wch/irq, but not SRAM
-		 */
-		/*set reset bit*/
+	/*
+	 *this reset bit will clear
+	 *CCIF's busy/wch/irq, but not SRAM
+	 */
+	/*set reset bit*/
 		regmap_write(md_ctrl->plat_val.infra_ao_base,
 			0x150, 1 << reset_bit);
 		/*clear reset bit*/
 		regmap_write(md_ctrl->plat_val.infra_ao_base,
 			0x154, 1 << reset_bit);
 	}
+
+	/*
+	 * The reset pulse leaves the SRAM intact, so this is the only point
+	 * where the MD view can still carry LK's pre-written smem-info tail.
+	 * Log it before the clear loop wipes both views (§80.41).
+	 */
+	CCCI_NORMAL_LOG(md_id, TAG,
+		"WORKAROUND: tail pre-clear A=%08x/%08x/%08x B=%08x/%08x/%08x flag=%d\n",
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32)),
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 2 * sizeof(u32)),
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 2 * sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32)),
+		devapc_check_flag);
 
 	/* clear SRAM */
 	for (i = 0; i < PCCIF_SRAM_SIZE/sizeof(unsigned int); i++) {
@@ -1896,15 +1972,14 @@ void ccci_reset_ccif_hw(unsigned char md_id,
 	ccif_write32(baseA,
 		PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32),
 		region->size);
+
 	/*
-	 * qqcandy: the tail above goes to the AP-side view only, and the vendor
-	 * code can afford that because on stock LK pre-writes the MD side. Our
-	 * clear loop above zeroes BOTH views, so without these writes the MD's
-	 * own view stays all zero, the modem stalls at early boot (boot_status
-	 * 0x5443000C/0x53320000 = "TC"/"S2") and never sends HS1 - exactly what
-	 * this device shows. Same three values, written to the MD window.
-	 * (Cross-checked against the MT6895-Mainline pearl port, whose comment
-	 * and verified result report the same stall and the same fix.)
+	 * WORKAROUND: republish the tail to the MD view too. The clear loop
+	 * above wipes whatever LK pre-wrote there, and the modem reads the
+	 * tail from its own view, so baseA-only leaves it all zero and the
+	 * MD stalls early with boot_status TC/S2 (§80.41; same as pearl's
+	 * HS1 fix). The immediate readback tells us whether AP writes to the
+	 * CCIF SRAM land at all in the CCF-clock era.
 	 */
 	ccif_write32(baseB,
 		PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32),
@@ -1915,6 +1990,40 @@ void ccci_reset_ccif_hw(unsigned char md_id,
 	ccif_write32(baseB,
 		PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32),
 		region->size);
+	CCCI_NORMAL_LOG(md_id, TAG,
+		"WORKAROUND: tail wrote, readback A=%08x/%08x/%08x B=%08x/%08x/%08x\n",
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32)),
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 2 * sizeof(u32)),
+		ccif_read32(baseA, PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 3 * sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - 2 * sizeof(u32)),
+		ccif_read32(baseB, PCCIF_CHDATA + PCCIF_SRAM_SIZE - sizeof(u32)));
+
+	/*
+	 * Discriminator: do plain register writes stick? The IRQ masks are
+	 * pure configuration (bits gate the IRQ lines, not the doorbells; in
+	 * this register 1 = unmask, 0 = mask), so a write+readback here
+	 * separates "the whole AP window denies transactions" from "only the
+	 * CHDATA/SRAM path is broken". The original value is saved and
+	 * restored, so the polarity and the runtime state are untouched.
+	 */
+	{
+		u32 m0 = ccif_read32(baseA, APCCIF_IRQ0_MASK);
+		u32 m1 = ccif_read32(baseA, APCCIF_IRQ1_MASK);
+		u32 r0, r1, f0, f1;
+
+		ccif_write32(baseA, APCCIF_IRQ0_MASK, 0xAAAA5555);
+		ccif_write32(baseA, APCCIF_IRQ1_MASK, 0xAAAA5555);
+		r0 = ccif_read32(baseA, APCCIF_IRQ0_MASK);
+		r1 = ccif_read32(baseA, APCCIF_IRQ1_MASK);
+		ccif_write32(baseA, APCCIF_IRQ0_MASK, m0);
+		ccif_write32(baseA, APCCIF_IRQ1_MASK, m1);
+		f0 = ccif_read32(baseA, APCCIF_IRQ0_MASK);
+		f1 = ccif_read32(baseA, APCCIF_IRQ1_MASK);
+		CCCI_NORMAL_LOG(md_id, TAG,
+			"WORKAROUND: mask probe orig=%08x/%08x pattern-rb=%08x/%08x restored=%08x/%08x\n",
+			m0, m1, r0, r1, f0, f1);
+	}
 }
 EXPORT_SYMBOL(ccci_reset_ccif_hw);
 
@@ -1992,6 +2101,11 @@ static irqreturn_t md_cd_ccif_isr(int irq, void *data)
 {
 	struct md_ccif_ctrl *ccif_ctrl = (struct md_ccif_ctrl *)data;
 	int channel_id;
+	int observe_count = atomic_inc_return(&ccif_data1_observe_count);
+
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: CCIF_DATA1 entry n=%d irq=%d cpu=%u\n",
+			observe_count, irq, raw_smp_processor_id());
 
 	/* must ack first, otherwise IRQ will rush in */
 	channel_id = ccif_read32(ccif_ctrl->ccif_ap_base,
@@ -2007,6 +2121,9 @@ static irqreturn_t md_cd_ccif_isr(int irq, void *data)
 		ccif_irq_cb[ID_CCIF_USER_DATA].cb_func(ccif_irq_cb[ID_CCIF_USER_DATA].id);
 
 	md_fsm_exp_info(ccif_ctrl->md_id, channel_id);
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: CCIF_DATA1 exit n=%d irq=%d cpu=%u ch=0x%x\n",
+			observe_count, irq, raw_smp_processor_id(), channel_id);
 
 	return IRQ_HANDLED;
 }
@@ -2043,41 +2160,83 @@ static int ccif_late_init(unsigned char hif_id)
 }
 
 /*
- * qqcandy: raw infra-ao gate fallback for the six CCIF clocks while the
- * clk-bus provider is not ported. Bit list from the official
- * clk-mt6895-bus.c; verified latch behaviour on device (HANDOFF 80.17).
+ * qqcandy: keep the raw infra-ao fallback only for DTs which do not expose
+ * the official six CCIF clocks.  The normal qqcandy DT uses the MT6895 CCF
+ * provider, matching the official 5.10 path.
  */
-#define CCI_RAW_IFRAO1_SET_BITS ((1u << 12) | (1u << 13) | \
+#define CCI_RAW_IFRAO1_BITS ((1u << 12) | (1u << 13) | \
 				 (1u << 23) | (1u << 26))
-#define CCI_RAW_IFRAO3_SET_BITS ((1u << 10) | (1u << 29))
+#define CCI_RAW_IFRAO3_BITS ((1u << 10) | (1u << 29))
 
-static void ccif_raw_gates(struct md_ccif_ctrl *ccif_ctrl, bool on)
+static bool ccif_has_clk_refs(void)
 {
-	unsigned int any_clk = 0;
 	int idx;
 
 	for (idx = 0; idx < ARRAY_SIZE(ccif_clk_table); idx++)
 		if (ccif_clk_table[idx].clk_ref)
-			any_clk = 1;
-	if (any_clk)
-		return;
+			return true;
 
-	if (on) {
-		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x88,
-			     CCI_RAW_IFRAO1_SET_BITS);
-		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC0,
-			     CCI_RAW_IFRAO3_SET_BITS);
-		pr_info("CCI-CCIF: raw gate ON (IFRAO1 0x4803000, IFRAO3 0x2000400)\n");
-	} else {
-		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x8C,
-			     CCI_RAW_IFRAO1_SET_BITS);
-		regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC4,
-			     CCI_RAW_IFRAO3_SET_BITS);
-		pr_info("CCI-CCIF: raw gate OFF\n");
-	}
+	return false;
 }
 
-static void ccif_set_clk_on(unsigned char hif_id)
+static int ccif_raw_gates(struct md_ccif_ctrl *ccif_ctrl, bool on)
+{
+	unsigned int sta1, sta3;
+	int ret;
+
+	if (ccif_has_clk_refs())
+		return 0;
+
+	/*
+	 * MT6895 uses mtk_clk_gate_ops_setclr: enable writes CLR and a zero
+	 * status bit means enabled.  The old fallback did the inverse, leaving
+	 * all six CCIF gates disabled while reporting them as on.
+	 */
+	if (on) {
+		ret = regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x8C,
+				   CCI_RAW_IFRAO1_BITS);
+		if (ret)
+			return ret;
+		ret = regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC4,
+				   CCI_RAW_IFRAO3_BITS);
+	} else {
+		ret = regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0x88,
+				   CCI_RAW_IFRAO1_BITS);
+		if (ret)
+			return ret;
+		ret = regmap_write(ccif_ctrl->plat_val.infra_ao_base, 0xC0,
+				   CCI_RAW_IFRAO3_BITS);
+	}
+	if (ret)
+		return ret;
+
+	ret = regmap_read(ccif_ctrl->plat_val.infra_ao_base, 0x94, &sta1);
+	if (ret)
+		return ret;
+	ret = regmap_read(ccif_ctrl->plat_val.infra_ao_base, 0xC8, &sta3);
+	if (ret)
+		return ret;
+
+	if (on) {
+		if ((sta1 & CCI_RAW_IFRAO1_BITS) ||
+		    (sta3 & CCI_RAW_IFRAO3_BITS)) {
+			pr_err("CCI-CCIF: raw gate ON failed: STA1=0x%08x STA3=0x%08x\n",
+			       sta1, sta3);
+			return -EIO;
+		}
+	} else if ((sta1 & CCI_RAW_IFRAO1_BITS) != CCI_RAW_IFRAO1_BITS ||
+		   (sta3 & CCI_RAW_IFRAO3_BITS) != CCI_RAW_IFRAO3_BITS) {
+		pr_err("CCI-CCIF: raw gate OFF failed: STA1=0x%08x STA3=0x%08x\n",
+		       sta1, sta3);
+		return -EIO;
+	}
+
+	pr_info("CCI-CCIF: raw gates %s: STA1=0x%08x STA3=0x%08x\n",
+		on ? "ON" : "OFF", sta1, sta3);
+	return 0;
+}
+
+static int ccif_set_clk_on(unsigned char hif_id)
 {
 	struct md_ccif_ctrl *ccif_ctrl =
 		(struct md_ccif_ctrl *)ccci_hif_get_by_id(hif_id);
@@ -2086,36 +2245,39 @@ static void ccif_set_clk_on(unsigned char hif_id)
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s start\n", __func__);
 
-	ccif_raw_gates(ccif_ctrl, true);
+	ret = ccif_raw_gates(ccif_ctrl, true);
+	if (ret) {
+		CCCI_ERROR_LOG(ccif_ctrl->md_id, TAG,
+			"%s, raw gate enable failed %d\n", __func__, ret);
+		return ret;
+	}
 
 	for (idx = 0; idx < ARRAY_SIZE(ccif_clk_table); idx++) {
 		if (ccif_clk_table[idx].clk_ref == NULL)
 			continue;
 		ret = clk_prepare_enable(ccif_clk_table[idx].clk_ref);
-		if (ret)
+		if (ret) {
 			CCCI_ERROR_LOG(ccif_ctrl->md_id, TAG,
 				"%s,ret=%d\n",
 				__func__, ret);
+			return ret;
+		}
 		spin_lock_irqsave(&devapc_flag_lock, flags);
 		devapc_check_flag = 1;
 		spin_unlock_irqrestore(&devapc_flag_lock, flags);
 	}
 
-	/*
-	 * qqcandy: every clk_ref above is NULL (our DTS has no clocks property),
-	 * so the loop body never runs and the vendor's devapc_check_flag would
-	 * stay 0 - and with it ccif_read32() returns 0 for everything and
-	 * ccif_write32() silently drops every write (HANDOFF §80.35). The gates
-	 * are open (ccif_raw_gates) and the MD bank is up, so declare the block
-	 * usable here instead. Pure flag write, no hardware access.
-	 */
-	spin_lock_irqsave(&devapc_flag_lock, flags);
-	devapc_check_flag = 1;
-	spin_unlock_irqrestore(&devapc_flag_lock, flags);
-	pr_info("CCI-CCIF: %s: devapc_check_flag=1 (raw-gate path)\n",
-		__func__);
+	/* A legacy DT has no clk_refs, so the vendor loop cannot set this flag. */
+	if (!ccif_has_clk_refs()) {
+		spin_lock_irqsave(&devapc_flag_lock, flags);
+		devapc_check_flag = 1;
+		spin_unlock_irqrestore(&devapc_flag_lock, flags);
+		pr_info("CCI-CCIF: %s: devapc_check_flag=1 (raw-gate path)\n",
+			__func__);
+	}
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s end\n", __func__);
+	return 0;
 }
 
 /*
@@ -2128,20 +2290,17 @@ static void ccif_set_clk_off(unsigned char hif_id)
 {
 	struct md_ccif_ctrl *ccif_ctrl =
 		(struct md_ccif_ctrl *)ccci_hif_get_by_id(hif_id);
-	int idx;
+	int idx, ret;
 	unsigned long flags;
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s start\n", __func__);
 
-	/*
-	 * Mirror the vendor's in-loop devapc_check_flag = 0 here: with every
-	 * clk_ref NULL the loop below never runs, so without this the flag would
-	 * stay 1 while the gates are being closed - the exact combination that
-	 * wedged the bus before (HANDOFF §80.17).
-	 */
-	spin_lock_irqsave(&devapc_flag_lock, flags);
-	devapc_check_flag = 0;
-	spin_unlock_irqrestore(&devapc_flag_lock, flags);
+	/* The official CCF path clears this in its loop, after the tail writes. */
+	if (!ccif_has_clk_refs()) {
+		spin_lock_irqsave(&devapc_flag_lock, flags);
+		devapc_check_flag = 0;
+		spin_unlock_irqrestore(&devapc_flag_lock, flags);
+	}
 
 	if ((ccif_ctrl->plat_val.md_gen >= 6298) ||
 	    (ccif_ctrl->ccif_hw_reset_ver == 1)) {
@@ -2188,6 +2347,10 @@ static void ccif_set_clk_off(unsigned char hif_id)
 		spin_unlock_irqrestore(&devapc_flag_lock, flags);
 		clk_disable_unprepare(ccif_clk_table[idx].clk_ref);
 	}
+	ret = ccif_raw_gates(ccif_ctrl, false);
+	if (ret)
+		CCCI_ERROR_LOG(ccif_ctrl->md_id, TAG,
+			"%s, raw gate disable failed %d\n", __func__, ret);
 
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s end\n", __func__);
 }
@@ -2196,6 +2359,7 @@ static int ccif_start(unsigned char hif_id)
 {
 	struct md_ccif_ctrl *ccif_ctrl =
 		(struct md_ccif_ctrl *)ccci_hif_get_by_id(hif_id);
+	int ret;
 
 	if (ccif_ctrl->ccif_state == HIFCCIF_STATE_PWRON)
 		return 0;
@@ -2204,18 +2368,28 @@ static int ccif_start(unsigned char hif_id)
 	if (hif_id != CCIF_HIF_ID)
 		CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s but %d\n",
 			__func__, hif_id);
-	ccif_set_clk_on(hif_id);
+	ret = ccif_set_clk_on(hif_id);
+	if (ret)
+		return ret;
+	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG,
+		"start stage: SRAM reset begin\n");
 	md_ccif_sram_reset(CCIF_HIF_ID);
+	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG,
+		"start stage: SRAM reset done\n");
 	md_ccif_switch_ringbuf(CCIF_HIF_ID, RB_EXP);
 	md_ccif_reset_queue(CCIF_HIF_ID, 1);
 	md_ccif_switch_ringbuf(CCIF_HIF_ID, RB_NORMAL);
 	md_ccif_reset_queue(CCIF_HIF_ID, 1);
+	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG,
+		"start stage: queue reset done, HW reset begin\n");
 
 	/* clear all ccif irq before enable it.*/
 	ccci_reset_ccif_hw(ccif_ctrl->md_id, AP_MD1_CCIF,
 		ccif_ctrl->ccif_ap_base,
 		ccif_ctrl->ccif_md_base, ccif_ctrl);
-	ccif_ctrl->ccif_state = HIFCCIF_STATE_PWRON;
+	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG,
+		"start stage: HW reset done\n");
+	WRITE_ONCE(ccif_ctrl->ccif_state, HIFCCIF_STATE_PWRON);
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s\n", __func__);
 	return 0;
 }
@@ -2224,6 +2398,7 @@ static int ccif_stop(unsigned char hif_id)
 {
 	struct md_ccif_ctrl *ccif_ctrl =
 		(struct md_ccif_ctrl *)ccci_hif_get_by_id(hif_id);
+	bool data0_irq_masked;
 
 	if (ccif_ctrl->ccif_state == HIFCCIF_STATE_PWROFF
 		|| ccif_ctrl->ccif_state == HIFCCIF_STATE_MIN)
@@ -2231,9 +2406,15 @@ static int ccif_stop(unsigned char hif_id)
 	/* ACK CCIF for MD. while entering flight mode,
 	 * we may send something after MD slept
 	 */
-	ccif_ctrl->ccif_state = HIFCCIF_STATE_PWROFF;
+	WRITE_ONCE(ccif_ctrl->ccif_state, HIFCCIF_STATE_PWROFF);
+	cancel_delayed_work_sync(&ccif_ctrl->data0_poll_work);
 	ccci_reset_ccif_hw(ccif_ctrl->md_id, AP_MD1_CCIF,
 		ccif_ctrl->ccif_ap_base, ccif_ctrl->ccif_md_base, ccif_ctrl);
+	synchronize_irq(ccif_ctrl->ap_ccif_irq0_id);
+	cancel_delayed_work_sync(&ccif_ctrl->data0_poll_work);
+	data0_irq_masked = atomic_xchg(&ccif_ctrl->data0_irq_masked, 0);
+	if (data0_irq_masked)
+		enable_irq(ccif_ctrl->ap_ccif_irq0_id);
 	/*disable ccif clk*/
 	ccif_set_clk_off(hif_id);
 	CCCI_NORMAL_LOG(ccif_ctrl->md_id, TAG, "%s\n", __func__);
@@ -2456,6 +2637,8 @@ int ccci_ccif_hif_init(struct platform_device *pdev,
 	}
 	/* ccif_ctrl = md_ctrl; */
 	INIT_WORK(&md_ctrl->ccif_sram_work, md_ccif_sram_rx_work);
+	INIT_DELAYED_WORK(&md_ctrl->data0_poll_work, md_ccif_data0_poll);
+	atomic_set(&md_ctrl->data0_irq_masked, 0);
 
 	timer_setup(&md_ctrl->traffic_monitor, md_ccif_traffic_monitor_func, 0);
 	md_ctrl->heart_beat_counter = 0;
