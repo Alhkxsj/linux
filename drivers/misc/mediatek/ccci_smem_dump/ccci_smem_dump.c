@@ -103,6 +103,47 @@ module_param_named(srcclkena, ccci_smem_dump_srcclkena, bool, 0600);
 MODULE_PARM_DESC(srcclkena,
 		 "apply the vendor MD_SRCCLKENA=0x21 setting at load (see HANDOFF 80.39)");
 
+/*
+ * DANGEROUS and off by default: reading the DEVAPC instance blocks wedges the
+ * bus - the first read of 0x1000e000 left the worker in D state and only a
+ * reboot cleared it (HANDOFF 80.36, second addendum). The stage used to run
+ * unconditionally, so every trigger of this module was a booby trap; it is
+ * now opt-in like the MD bank0 stage.
+ */
+static bool ccci_smem_dump_dapc_read;
+module_param_named(dapc_read, ccci_smem_dump_dapc_read, bool, 0600);
+MODULE_PARM_DESC(dapc_read,
+		 "DANGEROUS: also read the five DEVAPC instance blocks; wedges the bus (see HANDOFF 80.36)");
+
+/*
+ * DANGEROUS and off by default. Reading the CCIF register bank before the eccci
+ * driver has pulsed its reset HANGS THE BUS: on 2026-09-13 22:15 this stage was
+ * enabled with the MD domain up and the six clock gates opened, and the worker
+ * stuck on the very first readl (0x10209000+0x00, status=running result=-115);
+ * the device was unusable for ~4 minutes until it reset itself. So "read the
+ * ground truth before the driver programs the block" is NOT a viable
+ * experiment - the block only answers after the driver's reset pulse, and even
+ * then it answers 0 (see HANDOFF 80.44). Kept only as a record.
+ */
+static bool ccci_smem_dump_ccif_probe;
+module_param_named(ccif_probe, ccci_smem_dump_ccif_probe, bool, 0600);
+MODULE_PARM_DESC(ccif_probe,
+		 "DANGEROUS: read the CCIF banks before the driver programs them; hangs the bus (HANDOFF 80.44)");
+
+/*
+ * Off by default like every risky stage. This is the corrected version of
+ * the 80.45 comparison (which read a DPMAIF register via devmem2 with its
+ * IFRAO gates unproven and only re-proved that a gated read wedges the
+ * bus): open the three stock DPMAIF gates, prove them latched in STA,
+ * require the MD power domain up, and only then read the four windows
+ * from the stock dpmaif node in this worker (worst case is the known
+ * ~4-minute bus-wedge self-recovery).
+ */
+static bool ccci_smem_dump_dpmaif_probe;
+module_param_named(dpmaif_probe, ccci_smem_dump_dpmaif_probe, bool, 0600);
+MODULE_PARM_DESC(dpmaif_probe,
+		 "open the 3 stock DPMAIF clock gates and read its 4 windows (same-family comparison, HANDOFF 80.44.5/80.45)");
+
 static void ccci_smem_dump_srcclkena_run(void)
 {
 	void *ao = ioremap(0x0000000010001000ULL, 0x1000);
@@ -765,15 +806,180 @@ static void ccci_smem_dump_work_fn(struct work_struct *work)
 		}
 	}
 
-	/* ---- DEVAPC instances: violation record (read-only) ----
+	/* ---- CCIF register banks + SRAM windows (read-only, gated) ----
+	 * Ordered before the DEVAPC stage on purpose: this is the only stage
+	 * that answers "does the block respond to the AP at all", and it must
+	 * run before the eccci driver clears/publishes the SRAM.
+	 */
+	if (ccci_smem_dump_ccif_probe) {
+		static const struct {
+			unsigned int base;
+			const char *name;
+		} win[] = {
+			{ 0x10209000, "APCCIF" },
+			{ 0x1020a000, "MDCCIF" },
+		};
+		void *ao = ioremap(0x0000000010001000ULL, 0x1000);
+		unsigned int bp = ao ? readl(ao + 0xc4c) : 0;
+		unsigned int w;
+
+		if (ao)
+			iounmap(ao);
+		/* §80.36 corrected the polarity: bit28 SET = protection
+		 * asserted = the MD domain is off, so do not touch CCIF. */
+		if (bp & (1u << 28)) {
+			pr_info("CCCI-SMEM: CCIF probe skipped: BP_INFRASYS0_STA=0x%08x (MD domain off)\n",
+				bp);
+		} else {
+			/* Open the same six gates the driver opens, with the
+			 * same bits, BEFORE reading CCIF: an MTK peripheral
+			 * register read with the clock gated off wedges the
+			 * bus (this project learned that the hard way). The
+			 * status word tells us what LK had left. */
+			void *ao2 = ioremap(0x0000000010001000ULL, 0x1000);
+			unsigned int sta1 = ao2 ? readl(ao2 + 0x94) : 0;
+			unsigned int sta3 = ao2 ? readl(ao2 + 0xc8) : 0;
+
+			if (ao2) {
+				writel((1u << 12) | (1u << 13) | (1u << 23) |
+				       (1u << 26), ao2 + 0x88);
+				writel((1u << 10) | (1u << 29), ao2 + 0xc0);
+				pr_info("CCCI-SMEM: CCIF probe: gates before STA1=0x%08x STA3=0x%08x, after STA1=0x%08x STA3=0x%08x\n",
+					sta1, sta3, readl(ao2 + 0x94),
+					readl(ao2 + 0xc8));
+				iounmap(ao2);
+			} else {
+				pr_info("CCCI-SMEM: CCIF probe: infra_ao re-ioremap failed\n");
+			}
+			pr_info("CCCI-SMEM: CCIF probe: BP_INFRASYS0_STA=0x%08x (MD domain on)\n",
+				bp);
+			for (w = 0; w < ARRAY_SIZE(win); w++) {
+				void *ccif = ioremap(win[w].base, 0x1000);
+
+				if (!ccif) {
+					pr_info("CCCI-SMEM: %s ioremap failed\n",
+						win[w].name);
+					continue;
+				}
+				pr_info("CCCI-SMEM: %s CON=0x%08x BUSY=0x%08x START=0x%08x TCH=0x%08x RCH=0x%08x ACK=0x%08x\n",
+					win[w].name,
+					readl(ccif + 0x00), readl(ccif + 0x04),
+					readl(ccif + 0x08), readl(ccif + 0x0c),
+					readl(ccif + 0x10), readl(ccif + 0x14));
+				pr_info("CCCI-SMEM: %s CHDATA[0x100..] %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					win[w].name,
+					readl(ccif + 0x100), readl(ccif + 0x104),
+					readl(ccif + 0x108), readl(ccif + 0x10c),
+					readl(ccif + 0x110), readl(ccif + 0x114),
+					readl(ccif + 0x118), readl(ccif + 0x11c));
+				pr_info("CCCI-SMEM: %s CHDATA[0x2f0..] tail %08x %08x %08x %08x\n",
+					win[w].name,
+					readl(ccif + 0x2f0), readl(ccif + 0x2f4),
+					readl(ccif + 0x2f8), readl(ccif + 0x2fc));
+				iounmap(ccif);
+			}
+		}
+	}
+
+	/* ---- DPMAIF windows (read-only, gated) ----
+	 * The same-family comparison HANDOFF 80.44.5 asked for, done the way
+	 * 80.45 failed to do it. Stock clocks are IFRAO2[3] cldmabclk,
+	 * IFRAO3[26] dpmaif_main and IFRAO4[17] dpmaif_26m (stock
+	 * clk-mt6895-bus.c); nothing in our tree ever opens them, so they are
+	 * opened here and proven latched in STA before any window is touched.
+	 * The windows are the four reg entries of the stock dpmaif node.
+	 * Reading a live block returns data; the CCIF failure signature is
+	 * all-zero reads with dropped writes; a hang means the block is dark
+	 * like the DEVAPC instances. Either of the last two means the problem
+	 * is not CCIF-specific.
+	 */
+	if (ccci_smem_dump_dpmaif_probe) {
+		static const struct {
+			unsigned int base;
+			const char *name;
+		} win[] = {
+			{ 0x10014000, "DPMAIF_AO_UL" },
+			{ 0x1022c000, "DPMAIF_PD_MD_MISC" },
+			{ 0x1022d000, "DPMAIF_PD_UL" },
+			{ 0x1022e000, "DPMAIF_SRAM" },
+		};
+		void *ao = ioremap(0x0000000010001000ULL, 0x1000);
+		unsigned int bp = ao ? readl(ao + 0xc4c) : 0;
+
+		if (ao)
+			iounmap(ao);
+		/* Same polarity as the CCIF probe: bit28 SET = MD domain off. */
+		if (bp & (1u << 28)) {
+			pr_info("CCCI-SMEM: DPMAIF probe skipped: BP_INFRASYS0_STA=0x%08x (MD domain off)\n",
+				bp);
+		} else {
+			void *ao2 = ioremap(0x0000000010001000ULL, 0x1000);
+
+			if (!ao2) {
+				pr_info("CCCI-SMEM: DPMAIF probe: infra_ao re-ioremap failed\n");
+			} else {
+				unsigned int b2 = readl(ao2 + 0xac);
+				unsigned int b3 = readl(ao2 + 0xc8);
+				unsigned int b4 = readl(ao2 + 0xe8);
+				bool latched;
+
+				writel(1u << 3, ao2 + 0xa4);   /* IFRAO2 cldmabclk */
+				writel(1u << 26, ao2 + 0xc0);  /* IFRAO3 dpmaif_main */
+				writel(1u << 17, ao2 + 0xe0);  /* IFRAO4 dpmaif_26m */
+				latched = ((readl(ao2 + 0xac) & (1u << 3)) != 0) &&
+					  ((readl(ao2 + 0xc8) & (1u << 26)) != 0) &&
+					  ((readl(ao2 + 0xe8) & (1u << 17)) != 0);
+				pr_info("CCCI-SMEM: DPMAIF probe: gates before STA2=0x%08x STA3=0x%08x STA4=0x%08x, after STA2=0x%08x STA3=0x%08x STA4=0x%08x latched=%d\n",
+					b2, b3, b4, readl(ao2 + 0xac),
+					readl(ao2 + 0xc8), readl(ao2 + 0xe8),
+					latched);
+				iounmap(ao2);
+				if (!latched) {
+					pr_info("CCCI-SMEM: DPMAIF probe: a gate did not latch; not touching the windows\n");
+				} else {
+					unsigned int w;
+
+					pr_info("CCCI-SMEM: DPMAIF probe: BP_INFRASYS0_STA=0x%08x (MD domain on), reading windows\n",
+						bp);
+					for (w = 0; w < ARRAY_SIZE(win); w++) {
+						void *dpmaif = ioremap(win[w].base, 0x1000);
+
+						if (!dpmaif) {
+							pr_info("CCCI-SMEM: %s ioremap failed\n",
+								win[w].name);
+							continue;
+						}
+						pr_info("CCCI-SMEM: %s reading\n",
+							win[w].name);
+						pr_info("CCCI-SMEM: %s +0x00 %08x %08x %08x %08x +0x30 %08x %08x %08x %08x +0x46c %08x %08x\n",
+							win[w].name,
+							readl(dpmaif + 0x00),
+							readl(dpmaif + 0x04),
+							readl(dpmaif + 0x08),
+							readl(dpmaif + 0x0c),
+							readl(dpmaif + 0x30),
+							readl(dpmaif + 0x34),
+							readl(dpmaif + 0x38),
+							readl(dpmaif + 0x3c),
+							readl(dpmaif + 0x46c),
+							readl(dpmaif + 0x470));
+						iounmap(dpmaif);
+					}
+				}
+			}
+		}
+	}
+
+	/* ---- DEVAPC instances: violation record (read-only, gated) ----
 	 * Bases come from the stock FDT (always-on infra blocks). If a DEVAPC
 	 * rule denies the AP access to the CCIF, the hardware behaves exactly
 	 * like the CCIF does today - reads return the default 0, writes are
 	 * dropped - and it records the offending address in VIO_DBG*. Offsets
 	 * per devapc-mt6895.h: mask 0x000, sta 0x400, dbg 0x900/904/908/90C,
 	 * apc_con 0xF00.
+	 * NOT run unless dapc_read=1: the first read wedges the bus (§80.36).
 	 */
-	{
+	if (ccci_smem_dump_dapc_read) {
 		static const struct {
 			unsigned int base;
 			const char *name;
