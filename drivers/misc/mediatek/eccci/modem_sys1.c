@@ -51,6 +51,7 @@
 #define TAG "mcd"
 
 static void debug_in_flight_mode(struct ccci_modem *md);
+static atomic_t wdt_observe_count = ATOMIC_INIT(0);
 
 #ifdef CCCI_KMODULE_ENABLE
 bool spm_is_md1_sleep(void)
@@ -114,12 +115,17 @@ void wdt_disable_irq(struct ccci_modem *md)
 static irqreturn_t md_cd_wdt_isr(int irq, void *data)
 {
 	struct ccci_modem *md = (struct ccci_modem *)data;
+	int observe_count = atomic_inc_return(&wdt_observe_count);
 
-	//CCCI_ERROR_LOG(md->index, TAG, "MD WDT IRQ\n");
-	//ccci_event_log("md%d: MD WDT IRQ\n", md->index);
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: MD_WDT entry n=%d irq=%d cpu=%u\n",
+			observe_count, irq, raw_smp_processor_id());
 	ccif_disable_irq(md);
 	wdt_disable_irq(md);
 	ccci_fsm_recv_md_interrupt(md->index, MD_IRQ_WDT);
+	if (observe_count <= 4)
+		pr_info("CCCI-OBS: MD_WDT exit n=%d irq=%d cpu=%u\n",
+			observe_count, irq, raw_smp_processor_id());
 
 	return IRQ_HANDLED;
 }
@@ -1388,4 +1394,3 @@ int Is_MD_EMI_voilation(void)
 {
 	return 1;
 }
-

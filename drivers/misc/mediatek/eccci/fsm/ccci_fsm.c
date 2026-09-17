@@ -326,6 +326,7 @@ static void fsm_routine_start(struct ccci_fsm_ctl *ctl,
 {
 	int ret;
 	int count = 0, user_exit = 0, hs1_got = 0, hs2_got = 0;
+	unsigned int observe_count = 0;
 	struct ccci_fsm_event *event = NULL;
 	struct ccci_fsm_event  *next = NULL;
 	unsigned long flags;
@@ -372,12 +373,17 @@ static void fsm_routine_start(struct ccci_fsm_ctl *ctl,
 	/* 3. action and poll event queue */
 	ccci_md_pre_start(ctl->md_id);
 	fsm_broadcast_state(ctl, BOOT_WAITING_FOR_HS1);
+	pr_info("CCCI-OBS: md%d start call\n", ctl->md_id + 1);
 	ret = ccci_md_start(ctl->md_id);
+	pr_info("CCCI-OBS: md%d start returned %d\n", ctl->md_id + 1, ret);
 	if (ret)
 		goto fail;
 	ctl->boot_count++;
 	count = 0;
 	while (count < BOOT_TIMEOUT/EVENT_POLL_INTEVAL && !needforcestop) {
+		if (!observe_count)
+			pr_info("CCCI-OBS: md%d first HS poll enter\n",
+				ctl->md_id + 1);
 		spin_lock_irqsave(&ctl->event_lock, flags);
 		if (!list_empty(&ctl->event_queue)) {
 			event = list_first_entry(&ctl->event_queue,
@@ -422,6 +428,9 @@ static void fsm_routine_start(struct ccci_fsm_ctl *ctl,
 			}
 		}
 		spin_unlock_irqrestore(&ctl->event_lock, flags);
+		if (!observe_count)
+			pr_info("CCCI-OBS: md%d first HS poll unlocked\n",
+				ctl->md_id + 1);
 		if (fsm_check_for_ee(ctl, 0)) {
 			CCCI_ERROR_LOG(ctl->md_id, FSM,
 				"early exception detected\n");
@@ -434,6 +443,11 @@ static void fsm_routine_start(struct ccci_fsm_ctl *ctl,
 			count = 0;
 		else
 			count++;
+		observe_count++;
+		if (!(observe_count % (1000 / EVENT_POLL_INTEVAL)))
+			pr_info("CCCI-OBS: md%d HS poll alive n=%u hs1=%d hs2=%d fs=%d\n",
+				ctl->md_id + 1, observe_count, hs1_got, hs2_got,
+				atomic_read(&ctl->fs_ongoing));
 		msleep(EVENT_POLL_INTEVAL);
 	}
 	if (needforcestop) {
@@ -1054,4 +1068,3 @@ void reset_modem_hs2_status(void)
 {
 	hs2_done = 0;
 }
-
