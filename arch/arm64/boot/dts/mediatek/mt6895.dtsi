@@ -638,7 +638,9 @@
 		};
 
 		infracfg_ao: syscon@10001000 {
-			compatible = "mediatek,mt6895-infracfg-ao", "syscon", "simple-mfd";
+			compatible = "mediatek,mt6895-infracfg_ao",
+				     "mediatek,mt6895-infracfg-ao",
+				     "syscon", "simple-mfd";
 			reg = <0x10001000 0x1000>;
 			#clock-cells = <1>;
 
@@ -650,6 +652,11 @@
 				ti,reset-bits = <0x120 0x00 0x124 0x00 0x00 0x00
 						 0x1c 0x730 0x0c 0x734 0x0c 0x00 0x00 0x1c>;
 			};
+		};
+
+		pericfg: pericfg@10003000 {
+			compatible = "mediatek,pericfg", "syscon";
+			reg = <0x10003000 0x1000>;
 		};
 
 		infracfg_ao_mem: infracfg_ao_mem@10002000 {

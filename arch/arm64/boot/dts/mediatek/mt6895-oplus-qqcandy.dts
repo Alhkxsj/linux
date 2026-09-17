@@ -1899,9 +1899,8 @@ bias-disable;
 	 */
 	/*
 	 * AP<->MD CCIF hardware interface (stock FDT 2912; official
-	 * mt6895.dts ccifdriver). Clock gates are driven by raw infra-ao
-	 * set/clr writes in ccci_diag/ccif for now (the clk-bus provider
-	 * port is deferred), so no clocks property here.
+	 * mt6895.dts ccifdriver). The clock provider and the six CCIF gate
+	 * references below follow the official MT6895 5.10 implementation.
 	 */
 	ccifdriver: ccifdriver@10209000 {
 		compatible = "mediatek,ccci_ccif";
@@ -1912,6 +1911,16 @@ bias-disable;
 		mediatek,sram_size = <0x200>;
 		interrupts = <GIC_SPI 241 IRQ_TYPE_LEVEL_HIGH 0>,
 			     <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH 0>;
+		clocks = <&infracfg_ao CLK_IFRAO_CCIF_AP>,
+			 <&infracfg_ao CLK_IFRAO_CCIF_MD>,
+			 <&infracfg_ao CLK_IFRAO_CCIF1_AP>,
+			 <&infracfg_ao CLK_IFRAO_CCIF1_MD>,
+			 <&infracfg_ao CLK_IFRAO_CCIF4_MD>,
+			 <&infracfg_ao CLK_IFRAO_CCIF5_MD>;
+		clock-names = "infra-ccif-ap", "infra-ccif-md",
+			      "infra-ccif1-ap", "infra-ccif1-md",
+			      "infra-ccif4-md", "infra-ccif5-md";
+		ccif-pericfg = <&pericfg>;
 	};
 
 	ccci_md0: mddriver {
