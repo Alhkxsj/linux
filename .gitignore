@@ -205,3 +205,21 @@ docs/WORKFLOW.md
 docs/STATUS_phase1.1.md
 docs/PHASE_1.2_design.md
 docs/PHASE1.2_DESIGN.md
+
+# the whole docs/ tree is local bench documentation now (status/handoff only);
+# the published branch is kernel content only, same shape as the xaga branch
+/docs/
+
+# host-side CCCI test harness (development tooling, not kernel content)
+/tools/testing/ccci-probe/
+
+# untracked bring-up probe modules (read-only diagnostics, bench-only)
+drivers/misc/mediatek/srclken_probe/
+drivers/misc/mediatek/dapc_probe/
+drivers/misc/mediatek/devapc_pd_probe/
+drivers/misc/mediatek/md_pwr_probe/
+drivers/misc/mediatek/ccif_gate_probe/
+
+# bench forensics
+/expdb.bin
+/forensics/
