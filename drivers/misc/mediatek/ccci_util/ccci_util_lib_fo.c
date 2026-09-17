@@ -1768,12 +1768,28 @@ int __init ccci_util_fo_init(void)
 	s_g_md_usage_case |= (1 << MD_SYS1);
 
 	/*
-	 * qqcandy: the ccci_util_probe gate that used to sit here is gone.
-	 * collect_lk_boot_arguments() now reaches _common_process through the
-	 * LKINFO stash fallback even without the DT property, so the official
-	 * LK parse (options, MD memory, md1_chk, shared memory) is exactly what
-	 * we want at load: it fills the MD reserved memory, smem and ccb
-	 * layouts that the modem boot depends on (HANDOFF 80.33).
+	 * qqcandy: collect_lk_boot_arguments() still returns -1 here, and that is
+	 * deliberate, not an oversight. It opens with
+	 * "if (!ccci_util_probe) return -1;" (see line ~1072) and nothing in this
+	 * tree ever assigns ccci_util_probe -- the identically named variable in
+	 * ccci_probe/ccci_probe.c is a separate file-scope static and cannot
+	 * reach it. The LKINFO stash fallback further down in that function is
+	 * therefore dead code, and the built-in MD layout comes from the
+	 * WORKAROUND constants in eccci/ccci_modem.c instead.
+	 *
+	 * The gate is kept because the path it guards is destructive, not merely
+	 * a parse: _common_process() reads the tag blob and then CONSUMES it --
+	 * memset_io(s_g_lk_inf_base, 0, s_g_tag_inf_size) + iounmap(), or
+	 * free_reserved_memory() when lk_info_version >= 3 -- and the file-top
+	 * note (see collect_lk_boot_arguments() header) warns that
+	 * nc_smem_info_parsing()/dump_retrieve_info() free_reserved_memory() on
+	 * AP/MD shared regions. That is why the read-only, bounded parse lives in
+	 * the separate ccci_probe.ko module instead of the boot image.
+	 *
+	 * Do not "fix" this by deleting the gate: that re-arms the destructive
+	 * teardown at every boot and swaps the whole layout computation at once.
+	 * To learn LK's real values, load ccci_probe.ko and write 1 to
+	 * /sys/module/ccci_probe/parameters/ccci_util_probe (HANDOFF 80-56).
 	 */
 
 	CCCI_UTIL_INF_MSG("%s 0.\n", __func__);
