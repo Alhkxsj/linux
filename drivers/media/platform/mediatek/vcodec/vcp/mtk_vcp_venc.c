@@ -36,6 +36,7 @@ struct venc_output {
 
 struct mtk_vcp_venc_inst {
 	struct list_head list, allocations, dma_buffers;
+	struct vcp_venc_dma_pool dma_pool;
 	struct mtk_vcp_venc *enc;
 	u64 cookie;
 	u32 firmware_instance, expected, codec_id;
@@ -82,8 +83,13 @@ static void venc_release_dma(struct mtk_vcp_venc_inst *inst, u64 cookie, bool al
 			inst->buffer_bytes -= buffer->plane[i].size;
 		inst->buffer_count--;
 		list_del(&buffer->list);
-		vcp_venc_dma_release(buffer);
+		if (all)
+			vcp_venc_dma_release(buffer);
+		else
+			vcp_venc_dma_recycle(&inst->dma_pool, buffer);
 	}
+	if (all)
+		vcp_venc_dma_pool_clear(&inst->dma_pool);
 }
 
 static void venc_fail(struct mtk_vcp_venc_inst *inst, int error)
@@ -123,9 +129,9 @@ static int venc_collect_buffers(struct mtk_vcp_venc_inst *inst)
 	read = le32_to_cpu(READ_ONCE(ring->read));
 	write = le32_to_cpu(READ_ONCE(ring->write));
 	count = le32_to_cpu(READ_ONCE(ring->count));
-	dev_info(inst->enc->dev,
-		 "VENC RING collect: cookie=%#llx read=%u write=%u count=%u done=%u\n",
-		 inst->cookie, read, write, count, inst->done_count);
+	dev_dbg(inst->enc->dev,
+		"VENC RING collect: cookie=%#llx read=%u write=%u count=%u done=%u\n",
+		inst->cookie, read, write, count, inst->done_count);
 	if (read >= VCP_VENC_BUFFERS || write >= VCP_VENC_BUFFERS ||
 	    count > VCP_VENC_BUFFERS || count > VCP_VENC_BUFFERS - inst->done_count ||
 	    (read + count) % VCP_VENC_BUFFERS != write)
@@ -139,10 +145,10 @@ static int venc_collect_buffers(struct mtk_vcp_venc_inst *inst)
 		};
 		int bs = -1, frame = -1;
 
-		dev_info(inst->enc->dev,
-			 "VENC RING item: index=%u frame=%#llx bitstream=%#llx bytes=%u keyframe=%u\n",
-			 read, out.frame_cookie, out.bitstream_cookie, out.bytes,
-			 out.keyframe);
+		dev_dbg(inst->enc->dev,
+			"VENC RING item: index=%u frame=%#llx bitstream=%#llx bytes=%u keyframe=%u\n",
+			read, out.frame_cookie, out.bitstream_cookie, out.bytes,
+			out.keyframe);
 
 		if (!out.bitstream_cookie && !out.frame_cookie)
 			return -EPROTO;
@@ -166,9 +172,9 @@ static int venc_collect_buffers(struct mtk_vcp_venc_inst *inst)
 	WRITE_ONCE(ring->read, cpu_to_le32(read));
 	WRITE_ONCE(ring->count, 0);
 	dma_wmb();
-	dev_info(inst->enc->dev,
-		 "VENC RING collected: cookie=%#llx read=%u write=%u count=%u done=%u\n",
-		 inst->cookie, read, write, 0, inst->done_count);
+	dev_dbg(inst->enc->dev,
+		"VENC RING collected: cookie=%#llx read=%u write=%u count=%u done=%u\n",
+		inst->cookie, read, write, 0, inst->done_count);
 	return count;
 }
 
@@ -485,6 +491,7 @@ struct mtk_vcp_venc_inst *mtk_vcp_venc_new(struct mtk_vcp_venc *enc)
 	inst->codec_id = VCP_CODEC_H264_ENCODER;
 	INIT_LIST_HEAD(&inst->allocations);
 	INIT_LIST_HEAD(&inst->dma_buffers);
+	INIT_LIST_HEAD(&inst->dma_pool.buffers);
 	init_completion(&inst->reply);
 	mutex_lock(&enc->rx_lock);
 	if (enc->next_cookie == U64_MAX) {
@@ -1049,8 +1056,12 @@ int mtk_vcp_venc_submit_vb2(struct mtk_vcp_venc_inst *inst, unsigned int mode,
 		ret = -ENOMEM;
 		goto out;
 	}
+	/* Cached allocations count against the same instance DMA budget. */
+	if (inst->dma_pool.bytes >
+	    VCP_VENC_MAX_BUFFER_BYTES - inst->buffer_bytes - bytes)
+		vcp_venc_dma_pool_clear(&inst->dma_pool);
 	if (source) {
-		src = vcp_venc_dma_stage_input(enc->dev, source, layout);
+		src = vcp_venc_dma_stage_input(enc->dev, source, layout, &inst->dma_pool);
 		if (IS_ERR(src)) {
 			ret = PTR_ERR(src);
 			src = NULL;
@@ -1067,7 +1078,7 @@ int mtk_vcp_venc_submit_vb2(struct mtk_vcp_venc_inst *inst, unsigned int mode,
 	}
 	if (destination) {
 		dst = vcp_venc_dma_stage(enc->bitstream_dev, destination,
-					 DMA_FROM_DEVICE);
+					 DMA_FROM_DEVICE, &inst->dma_pool);
 		if (IS_ERR(dst)) {
 			ret = PTR_ERR(dst);
 			dst = NULL;
