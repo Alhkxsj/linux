@@ -5,6 +5,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/overflow.h>
 #include <linux/printk.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
@@ -989,7 +990,7 @@ int mtk_vcp_venc_submit_vb2(struct mtk_vcp_venc_inst *inst, unsigned int mode,
 	struct mtk_vcp_venc *enc = inst->enc;
 	struct vcp_venc_dma_buffer *src = NULL, *dst = NULL;
 	struct vcp_venc_frame frame = {};
-	size_t bytes = 0;
+	size_t bytes = 0, budget_left;
 	unsigned int i, count = !!source + !!destination;
 	bool tracked;
 	int ret;
@@ -1036,7 +1037,11 @@ int mtk_vcp_venc_submit_vb2(struct mtk_vcp_venc_inst *inst, unsigned int mode,
 				ret = -EINVAL;
 				goto out;
 			}
-			bytes += layout->dst_size[i];
+			if (check_add_overflow(bytes, (size_t)layout->dst_size[i],
+					       &bytes)) {
+				ret = -EOVERFLOW;
+				goto out;
+			}
 		}
 		for (; i < VCP_VENC_PLANES; i++) {
 			if (inst->input_size[i]) {
@@ -1050,15 +1055,20 @@ int mtk_vcp_venc_submit_vb2(struct mtk_vcp_venc_inst *inst, unsigned int mode,
 			ret = -EINVAL;
 			goto out;
 		}
-		bytes += destination->planes[0].length;
+		if (check_add_overflow(bytes,
+				       (size_t)destination->planes[0].length, &bytes)) {
+			ret = -EOVERFLOW;
+			goto out;
+		}
 	}
-	if (bytes > VCP_VENC_MAX_BUFFER_BYTES - inst->buffer_bytes) {
+	if (inst->buffer_bytes > VCP_VENC_MAX_BUFFER_BYTES ||
+	    bytes > VCP_VENC_MAX_BUFFER_BYTES - inst->buffer_bytes) {
 		ret = -ENOMEM;
 		goto out;
 	}
+	budget_left = VCP_VENC_MAX_BUFFER_BYTES - inst->buffer_bytes - bytes;
 	/* Cached allocations count against the same instance DMA budget. */
-	if (inst->dma_pool.bytes >
-	    VCP_VENC_MAX_BUFFER_BYTES - inst->buffer_bytes - bytes)
+	if (inst->dma_pool.bytes > budget_left)
 		vcp_venc_dma_pool_clear(&inst->dma_pool);
 	if (source) {
 		src = vcp_venc_dma_stage_input(enc->dev, source, layout, &inst->dma_pool);
