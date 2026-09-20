@@ -3767,17 +3767,6 @@ block_size = <0x1000>;
 			clock-output-names = "mipi_tx0_pll";
 		};
 
-		scp: scp@1c700000 {
-			compatible = "mediatek,mt6895-scp";
-			reg = <0x1c400000 0x180000>,
-			      <0x1c720000 0x40000>,
-			      <0x1c760000 0x40000>;
-			reg-names = "sram", "cfg", "l1tcm";
-			interrupts = <GIC_SPI 618 IRQ_TYPE_LEVEL_HIGH 0>;
-			/* Firmware/backend and resource bindings are incomplete. */
-			status = "disabled";
-		};
-
 		vcodec_dec: video-codec@16000000 {
 			compatible = "mediatek,mt6895-vcodec-dec";
 			reg = <0x16000000 0x1000>, <0x16020000 0x1000>,
