@@ -79,15 +79,15 @@
 		 * struct tag_videolfb { u64 fb_base; u32 islcmfound; u32 fps;
 		 *                      u32 vram; char lcmname[]; } (LE)
 		 * fb_base=0xfe14f000 (framebuffer region start), islcmfound=1,
-		 * fps=6060 (x100), vram=0x1eb0000, lcmname="l16_36_02_0b_dsc_vdo_lcm_drv".
+		 * fps=6042 (x100), vram=0x1eb0000, lcmname="l16_36_02_0b_dsc_vdo_lcm_drv".
+		 * fb_base/fps/vram and tail padding match the archived 8 GiB xaga
+		 * Android runtime FDT; lcmname names the panel
+		 * this tree registers.
 		 * Without it, mtk_crtc_fill_fb_para() fails and the LK framebuffer is
 		 * never inserted into the display IOMMU -> OVL fetch fault -> RDMA
 		 * underflow -> display pipeline stalls after the LK frame.
 		 */
-		atag,videolfb = [00 f0 14 fe 00 00 00 00 01 00 00 00 ac 17 00 00
-				 00 00 eb 01 6c 31 36 5f 33 36 5f 30 32 5f 30 62
-				 5f 64 73 63 5f 76 64 6f 5f 6c 63 6d 5f 64 72 76
-				 00 60 ff 50];
+		atag,videolfb = [00 f0 14 fe 00 00 00 00 01 00 00 00 9a 17 00 00 00 00 eb 01 6c 31 36 5f 33 36 5f 30 32 5f 30 62 5f 64 73 63 5f 76 64 6f 5f 6c 63 6d 5f 64 72 76 00 00 00 00];
 	};
 
 	/* USB gadget 3.3V rail (mtu3 requires vusb33-supply; LK powers it) */
@@ -144,36 +144,40 @@
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
+		mblock-41-debug_met_res-ram {
+			reg = <0x00 0x9f7ff000 0x00 0x800000>;
+			no-map;
+		};
 
 		/*
-		 * Full MT6895 reserved-memory layout, taken verbatim from the
+		 * MT6895 reserved-memory layout for the captured 8 GiB xaga, from the
 		 * live device tree (/sys/firmware/fdt) of the running stock
 		 * Android build. These regions are owned by ATF/TEE/SCP/SSPM,
 		 * modem, GPU and the display; the kernel MUST NOT allocate from
 		 * them or early boot crashes on memory corruption.
 		 */
 
-		wifi_reserved: mblock-45-shared-dma-pool_wifi-reserve-memory_dma {
+		wifi_reserved: mblock-46-shared-dma-pool_wifi-reserve-memory_dma {
 			reg = <0x00 0xbd000000 0x00 0x1400000>;
 			no-map;
 			compatible = "shared-dma-pool";
 		};
-		consys_reserved: mblock-44-consys_emi_reserved {
+		consys_reserved: mblock-45-consys_emi_reserved {
 			reg = <0x00 0x8e500000 0x00 0x800000>;
 			no-map;
 			compatible = "mediatek,consys_emi_reserved";
 		};
-		mblock-43-sspm_ap-shared {
-			reg = <0x00 0x7c4f0000 0x00 0x110000>;
+		mblock-44-sspm_ap-shared {
+			reg = <0x00 0x7c1f0000 0x00 0x110000>;
 			no-map;
 			compatible = "mediatek,sspm_ap-shared";
 		};
-		mblock-42-consys_gps_emi {
-			reg = <0x00 0x7cf00000 0x00 0x100000>;
+		mblock-43-consys_gps_emi {
+			reg = <0x00 0x7c500000 0x00 0x100000>;
 			no-map;
 			compatible = "mediatek,consys_gps_emi";
 		};
-		mblock-41-adsp_shared_reserved {
+		mblock-42-adsp_shared_reserved {
 			reg = <0x00 0xf8000000 0x00 0x660000>;
 			no-map;
 			compatible = "mediatek,adsp_shared_reserved";
@@ -189,7 +193,7 @@
 			compatible = "mediatek,me_GPUmputab_PMA";
 		};
 		mblock-38-me_GPUEB_SHARED {
-			reg = <0x00 0x7c600000 0x00 0x200000>;
+			reg = <0x00 0x7c300000 0x00 0x200000>;
 			no-map;
 			compatible = "mediatek,me_GPUEB_SHARED";
 		};
@@ -305,17 +309,17 @@
 			compatible = "mediatek,tee-reserved";
 		};
 		mblock-18-tee-secmem {
-			reg = <0x00 0x7c800000 0x00 0x700000>;
+			reg = <0x00 0x7c600000 0x00 0x700000>;
 			no-map;
 			compatible = "mediatek,tee-secmem";
 		};
 		mblock-17-MCUPM-reserved {
-			reg = <0x00 0x7f300000 0x00 0x100000>;
+			reg = <0x00 0x7cd00000 0x00 0x100000>;
 			no-map;
 			compatible = "mediatek,MCUPM-reserved";
 		};
 		mblock-16-SSPM-reserved {
-			reg = <0x00 0x7fe3f000 0x00 0x180000>;
+			reg = <0x00 0x7f080000 0x00 0x180000>;
 			no-map;
 			compatible = "mediatek,SSPM-reserved";
 		};
@@ -325,7 +329,7 @@
 			compatible = "mediatek,BL31-reserved";
 		};
 		mblock-14-platform_mtksmmu_protpgd {
-			reg = <0x00 0x7d000000 0x00 0x2200000>;
+			reg = <0x00 0x7ce00000 0x00 0x2200000>;
 			no-map;
 			compatible = "mediatek,platform_mtksmmu_protpgd";
 		};
@@ -365,16 +369,16 @@
 			compatible = "mediatek,log_store";
 		};
 		mblock-5-gz-log {
-			reg = <0x00 0x7f200000 0x00 0x41000>;
+			reg = <0x00 0x7f000000 0x00 0x41000>;
 			compatible = "mediatek,gz-log";
 		};
 		mblock-4-unmap2 {
-			reg = <0x00 0x7f400000 0x00 0x400000>;
+			reg = <0x00 0x7f200000 0x00 0x400000>;
 			no-map;
 			compatible = "mediatek,unmap2";
 		};
 		mblock-3-gz {
-			reg = <0x00 0x7f800000 0x00 0x600000>;
+			reg = <0x00 0x7f600000 0x00 0x900000>;
 			no-map;
 			compatible = "mediatek,gz";
 		};
@@ -1351,3 +1355,16 @@ bias-disable;
 
 /* Local USB/OTG bring-up; TCPM owns power direction and current limits. */
 #include "mt6895-xaga-usb-tcpm.dtsi"
+
+/*
+ * Keep the shared VCORE rail at or above 725 mV throughout runtime,
+ * including idle, to cover the LK display handover and display states
+ * whose minimum voltage is not yet validated. This regulator constraint
+ * does not expire after boot and prevents lower codec OPP votes from
+ * reducing the rail below 725 mV. It trades idle power for the current
+ * display stability margin; relax it only after display/GPU/codec and
+ * suspend/resume validation.
+ */
+&dvfsrc_vcore {
+	regulator-min-microvolt = <725000>;
+};
